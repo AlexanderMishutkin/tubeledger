@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- Dev harness: renders the dashboard against a stubbed chrome.* API and seeded
+     data, so the UI can be checked without loading the extension.
+       python3 -m http.server 8777   ->  http://localhost:8777/test/preview.html -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger — dashboard preview</title>
+  <link rel="stylesheet" href="../src/lib/theme.css">
+  <link rel="stylesheet" href="../src/dashboard.css">
+</head>
+<body>
+  <script>
+    // ---- seeded fake data -------------------------------------------------
+    const DAY_START = 4;
+    const pad = (n) => String(n).padStart(2, '0');
+    const keyOf = (ms) => {
+      const d = new Date(ms - DAY_START * 3600000);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const startOf = (key) => {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m - 1, d, DAY_START, 0, 0, 0).getTime();
+    };
+
+    let seed = 7;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+
+    function makeDay(key, { rich = false } = {}) {
+      const base = startOf(key);
+      const out = [];
+      let t = base + (7 + rnd() * 3) * 3600000;      // first look at YouTube mid-morning
+      const blocks = rich ? 14 : 4 + Math.floor(rnd() * 8);
+      for (let i = 0; i < blocks; i += 1) {
+        t += (10 + rnd() * 90) * 60000;             // a gap away from YouTube
+        const roll = rnd();
+        const c = roll < 0.3 ? 'work' : roll < 0.75 ? 'ent' : 'menu';
+        const bg = c !== 'menu' && rnd() < 0.28 ? 1 : 0;
+        const len = (c === 'menu' ? 1 + rnd() * 6 : 4 + rnd() * 35) * 60000;
+        const end = Math.min(t + len, base + 86400000 - 60000);
+        if (end <= t) break;
+        out.push({ id: `s${key}${i}`, s: t, e: end, c, bg });
+        t = end;
+        if (rnd() < 0.5) {                          // menus sit between videos
+          const mEnd = t + (1 + rnd() * 5) * 60000;
+          out.push({ id: `m${key}${i}`, s: t, e: mEnd, c: 'menu', bg: 0 });
+          t = mEnd;
+        }
+      }
+      return out;
+    }
+
+    const store = { settings: { entLimitMin: 60, dayStartHour: DAY_START } };
+    const today = keyOf(Date.now());
+    for (let i = 0; i < 30; i += 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = keyOf(d.getTime());
+      store[`d:${key}`] = makeDay(key, { rich: i === 0 });
+    }
+    // A long evening stretch, half of it audible from behind another window.
+    const base = startOf(today);
+    const from = base + 18.5 * 3600000;
+    const to = base + 19.6 * 3600000;
+    const day = store[`d:${today}`].filter((seg) => seg.e <= from || seg.s >= to);
+    day.push({ id: 'night1', s: from, e: base + 19.3 * 3600000, c: 'ent', bg: 0 });
+    day.push({ id: 'night2', s: base + 19.3 * 3600000, e: to, c: 'ent', bg: 1 });
+    day.sort((a, b) => a.s - b.s);
+    store[`d:${today}`] = day;
+
+    // ---- chrome.* stub ----------------------------------------------------
+    const listeners = [];
+    window.chrome = {
+      storage: {
+        local: {
+          async get(keys) {
+            if (keys === null || keys === undefined) return { ...store };
+            const list = Array.isArray(keys) ? keys : [keys];
+            const out = {};
+            for (const k of list) if (k in store) out[k] = store[k];
+            return out;
+          },
+          async set(obj) { Object.assign(store, obj); },
+          async remove(keys) {
+            for (const k of (Array.isArray(keys) ? keys : [keys])) delete store[k];
+          },
+          async clear() { for (const k of Object.keys(store)) delete store[k]; },
+        },
+        session: {
+          async get() { return {}; }, async set() {}, async remove() {},
+        },
+      },
+      runtime: {
+        async sendMessage(msg) {
+          if (msg.type === 'getSnapshot') {
+            return {
+              dayKey: today,
+              current: { c: 'ent', bg: false, since: Date.now() - 300000 },
+              idleState: 'active',
+              settings: { ...{ dayStartHour: DAY_START, entLimitMin: 60, defaultCategory: 'ent', countBackground: true, idleSeconds: 60, blockEnabled: true }, ...store.settings },
+              limitMs: (store.settings.entLimitMin || 60) * 60000,
+              totals: { work: 0, ent: 0, menu: 0, total: 0, fg: 0, bg: 0, byKind: {} },
+              blocked: false,
+              tabCategories: {},
+            };
+          }
+          return true;
+        },
+        onMessage: { addListener: (fn) => listeners.push(fn) },
+      },
+      tabs: { async query() { return [{ id: 1 }]; }, async create() {} },
+    };
+  </script>
+  <div class="wrap" id="root"></div>
+  <script type="module">
+    // Reuse the real dashboard markup so the preview cannot drift from it.
+    const html = await (await fetch('../src/dashboard.html')).text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.getElementById('root').replaceWith(doc.querySelector('.wrap'));
+    await import('../src/dashboard.js');
+    // #ent opens straight into the entertainment-only history view
+    if (location.hash === '#ent') {
+      setTimeout(() => document.querySelector('#mode-seg button[data-mode="ent"]').click(), 300);
+    }
+  </script>
+</body>
+</html>

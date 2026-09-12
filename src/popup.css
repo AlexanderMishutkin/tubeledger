@@ -1,0 +1,50 @@
+body { width: 320px; padding: 12px; background: var(--surface-0); }
+#app { display: flex; flex-direction: column; gap: 10px; }
+
+.head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.head .dim { font-size: 11px; }
+h1 { font-size: 16px; }
+
+.state-chip {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 11px; font-size: 11px; color: var(--text-2);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); flex: none; }
+.dot.hatch {
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.6) 0 1px, transparent 1px 3px);
+}
+
+.budget-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.hero { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.budget-used { font-size: 11px; text-align: right; }
+.budget .dim { font-size: 11px; }
+
+.meter {
+  margin-top: 10px; height: 8px; border-radius: 999px;
+  background: var(--surface-2); overflow: hidden; position: relative;
+}
+.meter-fill { height: 100%; width: 0; background: var(--c-ent); border-radius: 999px; }
+.meter.over .meter-fill { background: var(--c-ent); }
+
+.bar { display: flex; height: 10px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--surface-2); }
+.bar > span { display: block; height: 100%; }
+.bar > span.hatch {
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.5) 0 1.5px, transparent 1.5px 4px);
+}
+
+.rows { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rows li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rows .name { color: var(--text-2); }
+.rows .val { font-variant-numeric: tabular-nums; }
+.rows .sub { color: var(--text-3); font-size: 11px; }
+
+.label { color: var(--text-2); font-size: 11px; margin-bottom: 7px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seg button { text-align: center; padding: 7px 4px; font-size: 12px; }
+.seg button[aria-pressed="true"][data-cat="work"] { background: var(--c-work); border-color: var(--c-work); color: #fff; }
+.seg button[aria-pressed="true"][data-cat="ent"] { background: var(--c-ent); border-color: var(--c-ent); color: #fff; }
+.seg button:disabled { opacity: .5; cursor: default; }
+.tab-note { font-size: 11px; margin-top: 7px; }
+
+footer button { width: 100%; }

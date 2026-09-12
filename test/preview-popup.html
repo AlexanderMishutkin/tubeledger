@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Dev harness for the popup. See preview.html for how to run it. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger — popup preview</title>
+  <link rel="stylesheet" href="../src/lib/theme.css">
+  <link rel="stylesheet" href="../src/popup.css">
+  <style> body { width: 320px; margin: 0 auto; } </style>
+</head>
+<body>
+  <script>
+    const m = (x) => x * 60000;
+    const snapshot = {
+      dayKey: (() => {
+        const d = new Date(Date.now() - 4 * 3600000);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      })(),
+      settings: { dayStartHour: 4, entLimitMin: 60, defaultCategory: 'ent', countBackground: true, idleSeconds: 60, blockEnabled: true },
+      limitMs: m(60),
+      blocked: false,
+      idleState: 'active',
+      current: { c: 'ent', bg: true, since: Date.now() - m(4) },
+      totals: {
+        work: m(78), ent: m(43), menu: m(21), total: m(142), fg: m(119), bg: m(23),
+        byKind: { work_fg: m(64), work_bg: m(14), ent_fg: m(34), ent_bg: m(9), menu_fg: m(21), menu_bg: 0 },
+      },
+      tabCategories: { 1: 'ent' },
+    };
+    window.chrome = {
+      runtime: {
+        async sendMessage(msg) {
+          if (msg.type === 'setCategory') {
+            snapshot.tabCategories[1] = msg.category;
+            return snapshot;
+          }
+          return snapshot;
+        },
+      },
+      tabs: { async query() { return [{ id: 1 }]; } },
+    };
+  </script>
+  <div id="mount"></div>
+  <script type="module">
+    const html = await (await fetch('../src/popup.html')).text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.getElementById('mount').replaceWith(doc.getElementById('app'));
+    await import('../src/popup.js');
+  </script>
+</body>
+</html>

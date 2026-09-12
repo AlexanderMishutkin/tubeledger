@@ -1,0 +1,141 @@
+/* Palette validated with the data-viz six-checks validator.
+   Light  (surface #fcfcfb): CVD worst pair ΔE 14.7, normal-vision 28.3.
+   Dark   (surface #1a1a19): CVD worst pair ΔE 8.5,  normal-vision 21.8.
+   The muted (background-playback) steps sit in the 6–8 CVD band on dark, which is
+   legal only with secondary encoding — they always carry the 45° hatch and a label. */
+:root {
+  color-scheme: light;
+  --surface-0: #f4f3f0;
+  --surface-1: #fcfcfb;
+  --surface-2: #eeedea;
+  --line: #dcdbd6;
+  --line-strong: #c3c2bb;
+  --text-1: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #82817c;
+
+  --c-work: #1a9b22;
+  --c-ent: #96201c;
+  --c-menu: #f7b731;
+  --c-work-bg: #3c9640;
+  --c-ent-bg: #92403b;
+  --c-menu-bg: #d6aa4a;
+
+  --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --line: #33332f;
+    --line-strong: #4a4a45;
+    --text-1: #ffffff;
+    --text-2: #c3c2b7;
+    --text-3: #8a8a82;
+
+    --c-work: #1a9b22;
+    --c-ent: #ec7268;
+    --c-menu: #fcc53d;
+    --c-work-bg: #3c9640;
+    --c-ent-bg: #cf7971;
+    --c-menu-bg: #dab353;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --line: #33332f;
+  --line-strong: #4a4a45;
+  --text-1: #ffffff;
+  --text-2: #c3c2b7;
+  --text-3: #8a8a82;
+
+  --c-work: #1a9b22;
+  --c-ent: #ec7268;
+  --c-menu: #fcc53d;
+  --c-work-bg: #3c9640;
+  --c-ent-bg: #cf7971;
+  --c-menu-bg: #dab353;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+h1, h2, h3 { font-weight: 600; margin: 0; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: var(--surface-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+button:hover { background: var(--surface-2); }
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--c-work);
+  outline-offset: 1px;
+}
+
+input, select {
+  font: inherit;
+  color: inherit;
+  background: var(--surface-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.muted { color: var(--text-2); }
+.dim { color: var(--text-3); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Identity never rests on colour alone: every swatch is paired with its label. */
+.swatch {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  vertical-align: -1px;
+  margin-right: 6px;
+}
+.sw-work { background: var(--c-work); }
+.sw-ent { background: var(--c-ent); }
+.sw-menu { background: var(--c-menu); }
+.sw-work-bg { background: var(--c-work-bg); }
+.sw-ent-bg { background: var(--c-ent-bg); }
+.sw-menu-bg { background: var(--c-menu-bg); }
+.sw-hatch {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(255,255,255,.55) 0 1.5px, transparent 1.5px 4px);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--text-2);
+  font-size: 12px;
+}

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger — dashboard</title>
+  <link rel="stylesheet" href="lib/theme.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <h1>TubeLedger</h1>
+        <span class="dim">Your YouTube day, 04:00 to 04:00</span>
+      </div>
+      <nav class="daynav">
+        <button id="prev-day" aria-label="Previous day">&lsaquo;</button>
+        <span id="day-title" class="day-title">—</span>
+        <button id="next-day" aria-label="Next day">&rsaquo;</button>
+        <button id="today">Today</button>
+      </nav>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>The day</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div id="timeline" class="timeline"></div>
+      <p class="dim hint">Click a block to jump to its entry below. Hatched blocks played while the tab was in the background.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Last 30 days</h2>
+        <div class="seg small" id="mode-seg" role="group" aria-label="History view">
+          <button data-mode="all" aria-pressed="true">All time</button>
+          <button data-mode="ent" aria-pressed="false">Entertainment only</button>
+        </div>
+      </div>
+      <div id="history"></div>
+      <div class="legend" id="history-legend"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Entries</h2>
+        <div class="row-actions">
+          <button id="add-entry">Add entry</button>
+        </div>
+      </div>
+      <p class="warn" id="overlap-warn" hidden></p>
+      <div class="table-scroll">
+        <table id="entries">
+          <thead>
+            <tr>
+              <th scope="col">Type</th>
+              <th scope="col">Where</th>
+              <th scope="col">Start</th>
+              <th scope="col">Length</th>
+              <th scope="col">End</th>
+              <th scope="col"><span class="sr">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="entries-body"></tbody>
+        </table>
+      </div>
+      <p class="dim hint">Only the type and the length are stored — never a video title, channel or URL.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Settings</h2></div>
+      <div class="settings" id="settings">
+        <label>Daily entertainment limit
+          <span class="field"><input type="number" id="set-limit" min="0" max="1440" step="5"> <span class="dim">minutes</span></span>
+        </label>
+        <label>Day starts at
+          <span class="field"><input type="number" id="set-daystart" min="0" max="12" step="1"> <span class="dim">:00 local</span></span>
+        </label>
+        <label>New tabs count as
+          <span class="field">
+            <select id="set-default">
+              <option value="ent">Entertainment</option>
+              <option value="work">Work &amp; education</option>
+              <option value="unset">Uncategorised (yellow)</option>
+            </select>
+          </span>
+        </label>
+        <label>Stop counting after
+          <span class="field"><input type="number" id="set-idle" min="15" max="600" step="15"> <span class="dim">seconds idle</span></span>
+        </label>
+        <label class="check"><input type="checkbox" id="set-bg"> Count playback in background tabs</label>
+        <label class="check"><input type="checkbox" id="set-block"> Pause entertainment once the limit is spent</label>
+      </div>
+      <div class="row-actions data-actions">
+        <button id="export">Export JSON</button>
+        <button id="import">Import JSON</button>
+        <input type="file" id="import-file" accept="application/json" hidden>
+        <button id="wipe" class="danger">Erase all data</button>
+        <span class="dim" id="save-note"></span>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

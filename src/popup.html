@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger</title>
+  <link rel="stylesheet" href="lib/theme.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main id="app">
+    <header class="head">
+      <h1>Today</h1>
+      <div class="dim num" id="day-label">—</div>
+    </header>
+
+    <div class="state-chip" id="state-chip">
+      <span class="dot" id="state-dot"></span>
+      <span id="state-text">idle</span>
+    </div>
+
+    <section class="card budget">
+      <div class="budget-top">
+        <div>
+          <div class="hero num" id="budget-left">—</div>
+          <div class="dim" id="budget-sub">entertainment left today</div>
+        </div>
+        <div class="budget-used num dim">
+          <div id="budget-used"></div>
+          <div id="budget-of"></div>
+        </div>
+      </div>
+      <div class="meter" id="meter">
+        <div class="meter-fill" id="meter-fill"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="bar" id="day-bar" aria-hidden="true"></div>
+      <ul class="rows" id="rows"></ul>
+    </section>
+
+    <section class="card">
+      <div class="label">This tab counts as</div>
+      <div class="seg" id="seg" role="group" aria-label="Category for this tab">
+        <button data-cat="work" id="btn-work">Work &amp; education</button>
+        <button data-cat="ent" id="btn-ent">Entertainment</button>
+      </div>
+      <div class="dim tab-note" id="tab-note"></div>
+    </section>
+
+    <footer>
+      <button id="open-dash">Dashboard &amp; history</button>
+    </footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
