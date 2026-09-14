@@ -8,6 +8,12 @@
 (() => {
   'use strict';
 
+  // Bumped with the manifest (a test keeps the two in step). Reloading an
+  // unpacked extension does NOT replace this script in tabs that are already
+  // open, so a tab can go on running an old build against a new worker. When
+  // the worker reports a different version, the pill says so.
+  const BUILD = '0.3.0';
+
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;
   const OVERLAY_ID = 'tubeledger-limit-overlay';
@@ -27,6 +33,7 @@
   let usedMs = 0;
   let limitMs = 0;
   let hudEnabled = true;
+  let workerBuild = '';
 
   let hudSignature = '';
   let toastTimer = null;
@@ -99,6 +106,7 @@
         usedMs = msg.usedMs || 0;
         limitMs = msg.limitMs || 0;
         hudEnabled = msg.hudEnabled !== false;
+        workerBuild = msg.build || '';
         enforce();
         renderHud();
       } else if (msg.type === 'remind') {
@@ -331,8 +339,12 @@
    *   not playing (menus, search, a paused video) -> the explicit bar
    * The block overlay speaks for itself, so the indicator stays out of its way.
    */
+  function isStale() {
+    return !!workerBuild && workerBuild !== BUILD;
+  }
+
   function renderHud() {
-    if (!hudEnabled || blocked) {
+    if (blocked || (!hudEnabled && !isStale())) {
       removeHud();
       return;
     }
@@ -340,8 +352,10 @@
     const remaining = Math.max(0, limitMs - usedMs);
     const mode = category === 'work' ? 'work' : category === 'ent' ? 'ent' : 'unset';
     const slot = mastheadSlot();
-    const wanted = !(playing && mode !== 'work'); // watching entertainment: say nothing
-    const signature = `${playing}|${mode}|${Math.round(remaining / 60000)}|${limitMs}|${!!slot}|${isDark()}`;
+    // A stale tab always shows, even mid-video: one refresh is all it needs.
+    const stale = isStale();
+    const wanted = stale || !(playing && mode !== 'work'); // watching entertainment: say nothing
+    const signature = `${stale}|${playing}|${mode}|${Math.round(remaining / 60000)}|${limitMs}|${!!slot}|${isDark()}`;
 
     // Polymer re-renders the masthead often enough that a detached pill is
     // normal, not an error: rebuild whenever ours is no longer in the document.
@@ -357,7 +371,7 @@
       return;
     }
 
-    pillNode = buildPill(playing, mode, remaining, !!slot);
+    pillNode = stale ? buildStalePill(!!slot) : buildPill(playing, mode, remaining, !!slot);
     if (slot) {
       slot.insertBefore(pillNode, slot.firstChild);
       if (!document.querySelector(`#${HUD_ID} .tl-toast`)) removeFloatRoot();
@@ -370,6 +384,23 @@
   /** YouTube stamps `dark` on <html> for its dark theme; nothing there means light. */
   function isDark() {
     return document.documentElement.hasAttribute('dark');
+  }
+
+  function buildStalePill(docked) {
+    ensureStyles();
+    const pill = el('div', docked ? 'tl-dock' : 'tl-pill');
+    if (docked && isDark()) pill.classList.add('tl-dark');
+    pill.append(el('span', 'tl-dot tl-menu-dot'), el('span', 'tl-mode', 'TubeLedger updated'));
+    const refresh = el('button', 'tl-switch', 'Refresh');
+    refresh.type = 'button';
+    refresh.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      location.reload();
+    });
+    pill.appendChild(refresh);
+    pill.title = `This tab still runs TubeLedger ${BUILD}; the extension is now ${workerBuild}. Refresh to catch up.`;
+    return pill;
   }
 
   function buildPill(playing, mode, remaining, docked) {

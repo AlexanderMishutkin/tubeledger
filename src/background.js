@@ -278,6 +278,7 @@ function limitMessage() {
     limitMs: limitMs(),
     blockEnabled: settings.blockEnabled,
     hudEnabled: settings.hudEnabled,
+    build: chrome.runtime.getManifest().version,
   };
 }
 

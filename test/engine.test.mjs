@@ -48,6 +48,7 @@ globalThis.chrome = {
   tabs: { async create() {} },
   runtime: {
     getURL: (p) => p,
+    getManifest: () => ({ version: '0.0.0-test' }),
     onInstalled: { addListener() {} },
     onStartup: { addListener() {} },
     onConnect: { addListener: (fn) => listeners.connect.push(fn) },

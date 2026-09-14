@@ -97,7 +97,11 @@ watched, only of what kind of time it was.
 4. Pin the icon; open the popup to check it's counting
 
 Unpacked extensions don't auto-update — `git pull` and hit reload on
-`chrome://extensions` when you want the newer code.
+`chrome://extensions` when you want the newer code. **Reloading the extension
+does not touch YouTube tabs that are already open**: they keep running the old
+content script until they are refreshed. Tabs in that state say so in the header
+pill — *TubeLedger updated · Refresh* — so a stale tab is visible rather than
+puzzling.
 
 ## Permissions, and why each one is there
 

@@ -3,7 +3,7 @@
      stubbed chrome.* and a faked <video>, over a YouTube-ish backdrop.
        npm run preview  ->  http://localhost:8777/test/preview-hud.html?mode=work
      modes: work | ent | ent-toast | menu | blocked
-     add &theme=light, or &nomasthead=1 to check the floating fallback -->
+     add &theme=light, &nomasthead=1 (the fullscreen fallback), or &stale=1 -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -106,6 +106,8 @@
       limitMs: m(60),
       blockEnabled: true,
       hudEnabled: true,
+      // Omitted unless asked for: no version means "nothing to compare against".
+      build: params.get('stale') ? '9.9.9' : undefined,
     };
     const push = (msg) => { for (const fn of inbound) fn(msg); };
 
