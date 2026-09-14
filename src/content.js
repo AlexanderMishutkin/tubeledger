@@ -31,6 +31,7 @@
   let hudSignature = '';
   let toastTimer = null;
   let settleTimer = null;
+  let pillNode = null;   // lives in YouTube's masthead, or in the floating corner
 
   // ------------------------------------------------------------- detection
 
@@ -173,7 +174,41 @@
       }
       #${HUD_ID} .tl-pill.tl-settled { opacity: .5; }
       #${HUD_ID} .tl-pill:hover { opacity: 1; }
-      #${HUD_ID} .tl-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+      #${HUD_ID} .tl-dot, .tl-dock .tl-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+      .tl-work-dot { background: #1a9b22; }
+      .tl-ent-dot { background: #ec7268; }
+      .tl-menu-dot { background: #fcc53d; }
+      /* Docked in YouTube's own masthead, next to Create and the bell. */
+      .tl-dock {
+        display: inline-flex; align-items: center; gap: 8px; flex: none;
+        height: 32px; padding: 0 6px 0 11px; margin: 0 8px 0 0;
+        border-radius: 999px; white-space: nowrap;
+        font: 500 12px/1 "Roboto", system-ui, -apple-system, sans-serif;
+        background: rgba(0, 0, 0, .05); border: 1px solid rgba(0, 0, 0, .12); color: #0f0f0f;
+      }
+      .tl-dock.tl-dark {
+        background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .16); color: #f1f1f1;
+      }
+      .tl-dock.tl-dock-plain { padding-right: 12px; }
+      .tl-dock .tl-sep { opacity: .45; }
+      .tl-dock .tl-quiet { opacity: .7; font-weight: 400; }
+      .tl-dock .tl-time { font-variant-numeric: tabular-nums; }
+      .tl-dock .tl-check {
+        width: 15px; height: 15px; border-radius: 50%; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        background: #1a9b22; color: #fff; font-size: 10px; font-weight: 700;
+      }
+      .tl-dock .tl-switch {
+        font: inherit; font-size: 11px; cursor: pointer; border: 0; border-radius: 999px;
+        padding: 5px 9px; background: rgba(0, 0, 0, .07); color: inherit;
+      }
+      .tl-dock.tl-dark .tl-switch { background: rgba(255, 255, 255, .12); }
+      .tl-dock .tl-switch:hover { filter: brightness(.94); }
+      .tl-dock.tl-dark .tl-switch:hover { filter: brightness(1.3); }
+      /* A narrow window needs the room for YouTube's own buttons. */
+      @media (max-width: 1150px) { .tl-dock .tl-mode { display: none; } .tl-dock .tl-sep { display: none; } }
+      @media (max-width: 900px) { .tl-dock .tl-switch { display: none; } }
+
       #${HUD_ID} .tl-check {
         width: 15px; height: 15px; border-radius: 50%; flex: none;
         display: flex; align-items: center; justify-content: center;
@@ -237,6 +272,22 @@
 
   // ------------------------------------------------------------- the corner
 
+  /**
+   * YouTube's own masthead row, where the pill belongs: it is real header space,
+   * so the pill never covers a video, a thumbnail or the filter chips. Returns
+   * null when there is no masthead to dock into — fullscreen, or a layout change
+   * at YouTube's end — and the floating corner takes over.
+   */
+  function mastheadSlot() {
+    const slot = document.querySelector('ytd-masthead #end #buttons')
+      || document.querySelector('ytd-masthead #buttons')
+      || document.querySelector('#masthead #end');
+    if (!slot) return null;
+    const rect = slot.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 ? slot : null;
+  }
+
+  /** The floating corner: home of the reminder, and of the pill when undocked. */
   function hudRoot() {
     let root = document.getElementById(HUD_ID);
     if (!root) {
@@ -253,9 +304,15 @@
     return root;
   }
 
-  function removeHud() {
+  function removeFloatRoot() {
     const root = document.getElementById(HUD_ID);
     if (root) root.remove();
+  }
+
+  function removeHud() {
+    if (pillNode) pillNode.remove();
+    pillNode = null;
+    removeFloatRoot();
     hudSignature = '';
   }
 
@@ -268,11 +325,11 @@
   }
 
   /**
-   * What the corner says, by what the tab is doing:
+   * What the indicator says, by what the tab is doing:
    *   work + playing -> a quiet green tick: this is free of the limit
    *   entertainment + playing -> nothing standing, just the periodic reminder
    *   not playing (menus, search, a paused video) -> the explicit bar
-   * The block overlay speaks for itself, so the corner stays out of its way.
+   * The block overlay speaks for itself, so the indicator stays out of its way.
    */
   function renderHud() {
     if (!hudEnabled || blocked) {
@@ -282,42 +339,71 @@
     const playing = isPlaying();
     const remaining = Math.max(0, limitMs - usedMs);
     const mode = category === 'work' ? 'work' : category === 'ent' ? 'ent' : 'unset';
-    const signature = `${playing}|${mode}|${Math.round(remaining / 60000)}|${limitMs}`;
-    const root = hudRoot();
-    if (signature === hudSignature) return;
+    const slot = mastheadSlot();
+    const wanted = !(playing && mode !== 'work'); // watching entertainment: say nothing
+    const signature = `${playing}|${mode}|${Math.round(remaining / 60000)}|${limitMs}|${!!slot}|${isDark()}`;
+
+    // Polymer re-renders the masthead often enough that a detached pill is
+    // normal, not an error: rebuild whenever ours is no longer in the document.
+    const attached = pillNode && pillNode.isConnected;
+    if (signature === hudSignature && (!wanted || attached)) return;
     hudSignature = signature;
 
-    for (const old of root.querySelectorAll('.tl-pill')) old.remove();
+    if (pillNode) pillNode.remove();
+    pillNode = null;
     clearTimeout(settleTimer);
+    if (!wanted) {
+      if (!document.querySelector(`#${HUD_ID} .tl-toast`)) removeFloatRoot();
+      return;
+    }
 
-    const pill = el('div', 'tl-pill');
+    pillNode = buildPill(playing, mode, remaining, !!slot);
+    if (slot) {
+      slot.insertBefore(pillNode, slot.firstChild);
+      if (!document.querySelector(`#${HUD_ID} .tl-toast`)) removeFloatRoot();
+    } else {
+      hudRoot().appendChild(pillNode);
+      settleTimer = setTimeout(() => pillNode && pillNode.classList.add('tl-settled'), CHIP_SETTLE_MS);
+    }
+  }
+
+  /** YouTube stamps `dark` on <html> for its dark theme; nothing there means light. */
+  function isDark() {
+    return document.documentElement.hasAttribute('dark');
+  }
+
+  function buildPill(playing, mode, remaining, docked) {
+    ensureStyles();
+    const pill = el('div', docked ? 'tl-dock' : 'tl-pill');
+    if (docked && isDark()) pill.classList.add('tl-dark');
 
     if (playing && mode === 'work') {
-      const check = el('span', 'tl-check', '✓');
+      const check = el('span', 'tl-check', '\u2713');
       check.setAttribute('aria-hidden', 'true');
       pill.append(check, el('span', null, 'Educational'), el('span', 'tl-quiet', '· off the clock'));
       pill.title = 'Work & education time is tracked but never counts against the entertainment limit.';
-      settleTimer = setTimeout(() => pill.classList.add('tl-settled'), CHIP_SETTLE_MS);
-    } else if (playing) {
-      return; // watching entertainment: the reminder does the talking
-    } else {
-      const dot = el('span', 'tl-dot');
-      dot.style.background = mode === 'work' ? '#1a9b22' : mode === 'ent' ? '#ec7268' : '#fcc53d';
-      const label = mode === 'work' ? 'Work & education' : mode === 'ent' ? 'Entertainment' : 'Uncategorised';
-      pill.append(dot, el('span', null, label), el('span', 'tl-sep', '·'));
-      if (mode === 'work') {
-        pill.appendChild(el('span', 'tl-quiet', 'off the clock'));
-      } else {
-        pill.appendChild(el('span', 'tl-time', `${fmt(remaining)} left`));
-      }
-      const other = mode === 'work' ? 'ent' : 'work';
-      const swap = el('button', 'tl-switch', other === 'work' ? 'Mark educational' : 'Mark entertainment');
-      swap.addEventListener('click', () => setCategory(other));
-      pill.appendChild(swap);
-      pill.title = 'This tab’s mode, and what is left of today’s entertainment budget.';
+      pill.classList.add('tl-dock-plain');
+      return pill;
     }
 
-    root.appendChild(pill);
+    const dot = el('span', `tl-dot tl-${mode === 'unset' ? 'menu' : mode}-dot`);
+    const label = mode === 'work' ? 'Work & education' : mode === 'ent' ? 'Entertainment' : 'Uncategorised';
+    pill.append(dot, el('span', 'tl-mode', label), el('span', 'tl-sep', '·'));
+    pill.appendChild(mode === 'work'
+      ? el('span', 'tl-quiet', 'off the clock')
+      : el('span', 'tl-time', `${fmt(remaining)} left`));
+
+    const other = mode === 'work' ? 'ent' : 'work';
+    const swap = el('button', 'tl-switch', other === 'work' ? 'Mark educational' : 'Mark entertainment');
+    swap.type = 'button';
+    swap.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCategory(other);
+    });
+    pill.appendChild(swap);
+    pill.title = `This tab is ${label.toLowerCase()}. ${mode === 'work' ? 'It does not touch the limit.' : `${fmt(remaining)} of today's entertainment budget is left.`}`;
+    return pill;
   }
 
   function showToast(remainingMs) {

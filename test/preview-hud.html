@@ -2,7 +2,8 @@
 <!-- Dev harness for the on-page corner indicator. Renders content.js against a
      stubbed chrome.* and a faked <video>, over a YouTube-ish backdrop.
        npm run preview  ->  http://localhost:8777/test/preview-hud.html?mode=work
-     modes: work | ent | ent-toast | menu | blocked -->
+     modes: work | ent | ent-toast | menu | blocked
+     add &theme=light, or &nomasthead=1 to check the floating fallback -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -10,12 +11,26 @@
   <style>
     body { margin: 0; background: #0f0f0f; color: #f1f1f1;
            font: 14px/1.5 Roboto, system-ui, sans-serif; }
-    .masthead { height: 56px; background: #0f0f0f; border-bottom: 1px solid #272727;
-                display: flex; align-items: center; padding: 0 16px; gap: 12px;
-                position: sticky; top: 0; }
+    html:not([dark]) body { background: #fff; color: #0f0f0f; }
+    ytd-masthead { display: block; position: sticky; top: 0; z-index: 20;
+                   background: inherit; border-bottom: 1px solid #272727; }
+    html:not([dark]) ytd-masthead { border-bottom-color: #e5e5e5; }
+    ytd-masthead #container { height: 56px; display: flex; align-items: center;
+                              padding: 0 16px; gap: 16px; }
+    ytd-masthead #center { flex: 1; max-width: 500px; }
+    ytd-masthead #end { margin-left: auto; }
+    ytd-masthead #buttons { display: flex; align-items: center; gap: 8px; }
+    .yt-btn { height: 36px; border-radius: 999px; padding: 0 14px; display: flex;
+              align-items: center; background: #272727; font-size: 13px; font-weight: 500; }
+    html:not([dark]) .yt-btn { background: #f2f2f2; }
+    .yt-icon { width: 36px; height: 36px; border-radius: 50%; background: #272727; }
+    html:not([dark]) .yt-icon { background: #f2f2f2; }
+    .chips { display: flex; gap: 10px; padding: 12px 24px; }
+    .chip { background: #272727; border-radius: 8px; padding: 6px 14px; font-size: 13px; }
+    html:not([dark]) .chip { background: #f2f2f2; }
     .logo { font-weight: 700; letter-spacing: -.5px; }
-    .search { flex: 1; max-width: 500px; height: 34px; border: 1px solid #303030;
-              border-radius: 999px; background: #121212; }
+    .search { height: 34px; border: 1px solid #303030; border-radius: 999px; background: #121212; }
+    html:not([dark]) .search { border-color: #ccc; background: #fff; }
     .page { padding: 24px; display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
     .player { aspect-ratio: 16/9; background: linear-gradient(135deg, #1f1f24, #34343c);
               border-radius: 12px; display: flex; align-items: center;
@@ -25,7 +40,23 @@
   </style>
 </head>
 <body>
-  <div class="masthead"><span class="logo">YouTube</span><span class="search"></span></div>
+  <ytd-masthead id="masthead">
+    <div id="container">
+      <div id="start"><span class="logo">YouTube</span></div>
+      <div id="center"><div class="search"></div></div>
+      <div id="end">
+        <div id="buttons">
+          <span class="yt-btn">+ Create</span>
+          <span class="yt-icon"></span>
+          <span class="yt-icon"></span>
+        </div>
+      </div>
+    </div>
+  </ytd-masthead>
+  <div class="chips">
+    <span class="chip">All</span><span class="chip">Gaming</span>
+    <span class="chip">Role-Playing Games</span><span class="chip">Simulation video games</span>
+  </div>
   <div class="page">
     <div class="player">(player)</div>
     <div class="side"><div></div><div></div><div></div><div></div></div>
@@ -33,7 +64,11 @@
   <div class="state" id="state"></div>
 
   <script>
-    const mode = new URLSearchParams(location.search).get('mode') || 'work';
+    const params = new URLSearchParams(location.search);
+    const mode = params.get('mode') || 'work';
+    if (params.get('theme') !== 'light') document.documentElement.setAttribute('dark', '');
+    // No masthead = what fullscreen looks like: the pill falls back to floating.
+    if (params.get('nomasthead')) document.querySelector('ytd-masthead').remove();
     document.getElementById('state').textContent = `preview mode: ${mode}`;
 
     // A <video> the content script will read as playing (or not).

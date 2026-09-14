@@ -45,31 +45,33 @@ on purpose, which is the point.
 The toolbar badge counts the remaining entertainment minutes down: green, then
 amber under ten minutes, then red at zero.
 
-## The corner indicator
+## The header indicator
 
-YouTube itself gets a small indicator in the top-right, which says a different
-thing depending on what you are doing:
+YouTube's own header gets a pill, docked next to Create and the bell — real header
+space, so it never covers a thumbnail, a video or the filter chips. It says a
+different thing depending on what you are doing:
 
 **Watching work & education** — a quiet green tick, always there, so you can stop
-wondering whether the clock is running. It fades to half opacity after a few
-seconds and comes back on hover.
+wondering whether the clock is running.
 
-> ✓ Educational · off the clock
+![The educational tick](docs/corner-educational.png)
 
-**Watching entertainment** — nothing stands in the way. Instead a reminder slides
-in at each round figure of budget left (55m, 50m, 45m …) and fades after seven
-seconds. The step is configurable, or off.
-
-![The reminder](docs/corner-reminder.png)
-
-**Anywhere else — feeds, search, a paused video** — the explicit bar: which mode
-this tab is in, what is left of today's budget, and a button to switch mode
-without opening the popup.
+**Anywhere that isn't playing — feeds, search, a paused video** — the explicit
+bar: which mode this tab is in, what is left of today's budget, and a button to
+switch mode without opening the popup.
 
 ![The status bar](docs/corner-status.png)
 
-It follows the page into fullscreen (so does the limit overlay), stays out of the
-way when the limit overlay is up, and can be switched off entirely in Settings.
+**Watching entertainment** — nothing stands in the way. Instead a reminder slides
+into the corner below at each round figure of budget left (55m, 50m, 45m …) and
+fades after seven seconds. The step is configurable, or off.
+
+![The reminder](docs/corner-reminder.png)
+
+Where there is no header to dock into — fullscreen, or if YouTube rearranges its
+markup — the pill falls back to a floating card in the top-right corner. It stays
+out of the way when the limit overlay is up, and can be switched off entirely in
+Settings.
 
 ## Categories
 
@@ -163,8 +165,13 @@ labelled in the legend, the tooltips and the entries table.
 - Chrome/Chromium, Manifest V3. Not tested on Firefox.
 - Tab categories live in session storage: they survive a service-worker restart,
   but reset when Chrome fully closes.
-- The corner indicator's clock ticks in whole minutes and updates every few
-  seconds, so a reminder can land a few seconds after the exact figure.
+- The indicator's clock ticks in whole minutes and updates every few seconds, so
+  a reminder can land a few seconds after the exact figure.
+- Docking into the header means reading YouTube's markup (`ytd-masthead #buttons`)
+  — the one piece of the extension coupled to their DOM. If it changes, the pill
+  re-appears as a floating card rather than disappearing; nothing else is affected.
+  On a narrow window the pill sheds its label, then its button, to leave YouTube's
+  own controls room.
 - A sleeping machine or a suspended worker leaves a gap of up to a few seconds
   unbilled at each end. That is deliberate — a gap is never billed.
 - Editing a day that is still in progress discards at most the last few seconds of
