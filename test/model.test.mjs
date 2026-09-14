@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dayKey, dayBounds, shiftDay, dayRange, splitByDay, totals, mergeAdjacent,
-  fmtDuration, normalize,
+  fmtDuration, normalize, remindBucket,
 } from '../src/lib/model.js';
 
 const at = (y, m, d, h, min = 0) => new Date(y, m - 1, d, h, min, 0, 0).getTime();
@@ -105,4 +105,17 @@ test('durations read the way a human writes them', () => {
   assert.equal(fmtDuration(90000), '1m'); // whole minutes down, like a stopwatch
   assert.equal(fmtDuration(3900000), '1h 05m');
   assert.equal(fmtDuration(3600000), '1h'); // no dangling "00m"
+});
+
+test('reminder steps change exactly on the round figures', () => {
+  const five = 5 * 60000;
+  assert.equal(remindBucket(60 * 60000, five), 12, 'a full hour is step 12');
+  assert.equal(remindBucket(55 * 60000 + 1000, five), 12, 'a second above 55m is still step 12');
+  assert.equal(remindBucket(55 * 60000, five), 11, 'crossing 55m drops a step');
+  assert.equal(remindBucket(45 * 60000, five), 9);
+  assert.equal(remindBucket(0, five), 0);
+  assert.equal(remindBucket(-1000, five), 0, 'past the limit is not a negative step');
+  assert.equal(remindBucket(10 * 60000, 0), null, 'reminders off');
+  // The figure announced is the step times the interval: a round number.
+  assert.equal(remindBucket(45 * 60000, five) * five, 45 * 60000);
 });

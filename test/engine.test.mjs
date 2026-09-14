@@ -64,14 +64,17 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 /** A content script in tab `id`. */
 function openTab(id) {
   const handlers = { message: [], disconnect: [] };
+  const inbox = [];
   const port = {
     sender: { tab: { id } },
-    postMessage() {},
+    postMessage(msg) { inbox.push(msg); },
     onMessage: { addListener: (fn) => handlers.message.push(fn) },
     onDisconnect: { addListener: (fn) => handlers.disconnect.push(fn) },
   };
   connect(port);
   return {
+    inbox,
+    reminders: () => inbox.filter((m) => m && m.type === 'remind').map((m) => m.remainingMs),
     async say(msg) { for (const fn of handlers.message) await fn(msg); },
     async close() {
       for (const fn of handlers.disconnect) await fn();
@@ -197,6 +200,38 @@ test('crossing 04:00 files the two halves under different days', async () => {
   const today = totals(store['d:2026-09-13'] || []).ent;
   assert.equal(yesterday, 2 * 60000, 'two minutes filed before the boundary');
   assert.equal(today, 6 * 60000, 'six minutes filed after it');
+});
+
+test('watching entertainment is nudged at each round figure of budget left', async () => {
+  now = new Date(2026, 8, 16, 12, 0, 0, 0).getTime(); // a fresh, empty day
+  const tab = openTab(7);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCHING);          // entertainment by default, 60m of budget
+
+  await hold(tab, 4 * 60, WATCHING);
+  assert.deepEqual(tab.reminders(), [], 'nothing said in the first four minutes');
+
+  await hold(tab, 60, WATCHING);          // 5m spent: 55m left
+  assert.deepEqual(tab.reminders(), [55 * 60000], 'one nudge, on the round figure');
+
+  await hold(tab, 5 * 60, WATCHING);      // 10m spent
+  await hold(tab, 5 * 60, WATCHING);      // 15m spent
+  assert.deepEqual(tab.reminders(), [55 * 60000, 50 * 60000, 45 * 60000]);
+  await tab.close();
+});
+
+test('work & education time is never nudged and never blocked', async () => {
+  now = new Date(2026, 8, 17, 12, 0, 0, 0).getTime();
+  const tab = openTab(8);
+  await tab.say({ type: 'hello' });
+  await ask({ type: 'setCategory', tabId: 8, category: 'work' });
+  await switchTo(tab, WATCHING);
+  await hold(tab, 40 * 60, WATCHING); // well past the 60m entertainment budget in length
+
+  await tab.close(); // flushes the tail of the session
+  assert.deepEqual(tab.reminders(), [], 'no nudges for educational viewing');
+  assert.equal(tab.inbox.filter((m) => m.type === 'limit' && m.blocked).length, 0, 'never blocked');
+  assert.equal(totals(store['d:2026-09-17'] || []).work, 40 * 60000);
 });
 
 test.after(() => { Date.now = realNow; });

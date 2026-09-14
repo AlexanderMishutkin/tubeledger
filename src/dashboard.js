@@ -382,6 +382,8 @@ function fillSettings() {
   $('set-default').value = settings.defaultCategory;
   $('set-idle').value = settings.idleSeconds;
   $('set-bg').checked = !!settings.countBackground;
+  $('set-hud').checked = !!settings.hudEnabled;
+  $('set-remind').value = String(settings.remindEveryMin);
   $('set-block').checked = !!settings.blockEnabled;
 }
 
@@ -392,6 +394,8 @@ async function onSettingChange() {
     defaultCategory: $('set-default').value,
     idleSeconds: clamp(Number($('set-idle').value) || 60, 15, 600),
     countBackground: $('set-bg').checked,
+    hudEnabled: $('set-hud').checked,
+    remindEveryMin: clamp(Number($('set-remind').value) || 0, 0, 60),
     blockEnabled: $('set-block').checked,
   });
   fillSettings();
@@ -403,7 +407,7 @@ async function onSettingChange() {
   await reload();
 }
 
-for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block']) {
+for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block', 'set-hud', 'set-remind']) {
   $(id).addEventListener('change', onSettingChange);
 }
 

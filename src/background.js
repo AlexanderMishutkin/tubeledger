@@ -5,7 +5,7 @@
 // and flushes that segment to storage. Only one class can run at a time, so the
 // ledger can never add up to more than wall-clock time.
 import {
-  DEFAULT_SETTINGS, dayKey, splitByDay, totals, emptyTotals, fmtDuration,
+  DEFAULT_SETTINGS, dayKey, splitByDay, totals, emptyTotals, fmtDuration, remindBucket,
 } from './lib/model.js';
 import {
   getSettings, getDay, upsertSegment, newId,
@@ -30,6 +30,7 @@ let todayKey = dayKey(Date.now(), settings.dayStartHour);
 let storedToday = emptyTotals();
 let blocked = false;
 let ticking = false;
+let lastRemindBucket = null;
 
 // ---------------------------------------------------------------- lifecycle
 
@@ -124,6 +125,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'settingsChanged':
         settings = await getSettings();
         chrome.idle.setDetectionInterval(Math.max(15, settings.idleSeconds));
+        lastRemindBucket = null;
         await closeOpen();
         todayKey = dayKey(Date.now(), settings.dayStartHour);
         storedToday = totals(await getDay(todayKey));
@@ -137,6 +139,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The dashboard just rewrote this day. Storage is now the truth, so throw
         // away the in-flight segment rather than flushing it back over the edit.
         discardOpen();
+        lastRemindBucket = null;
         storedToday = totals(await getDay(todayKey));
         await refreshBadge();
         broadcastLimit();
@@ -201,6 +204,7 @@ async function tick(now = Date.now(), { boundary = false } = {}) {
     }
 
     await refreshBadge();
+    updateReminder();
   } finally {
     ticking = false;
   }
@@ -273,7 +277,38 @@ function limitMessage() {
     usedMs: entMsNow(),
     limitMs: limitMs(),
     blockEnabled: settings.blockEnabled,
+    hudEnabled: settings.hudEnabled,
   };
+}
+
+/**
+ * Nudge the watcher every `remindEveryMin` of budget spent. The step is worked
+ * out here, once, rather than in each tab: the worker is the only thing that
+ * knows the running total. Tabs decide whether they are the one being watched.
+ */
+function updateReminder() {
+  const interval = Math.max(0, settings.remindEveryMin) * 60000;
+  if (!interval || !settings.hudEnabled) {
+    lastRemindBucket = null;
+    return;
+  }
+  const remaining = Math.max(0, limitMs() - entMsNow());
+  const bucket = remindBucket(remaining, interval);
+  if (lastRemindBucket === null || bucket > lastRemindBucket) {
+    // First look, a new day, or time edited back in: take the step, say nothing.
+    lastRemindBucket = bucket;
+    return;
+  }
+  if (bucket < lastRemindBucket) {
+    lastRemindBucket = bucket;
+    if (remaining > 0) broadcastRemind(bucket * interval);
+  }
+}
+
+function broadcastRemind(remainingMs) {
+  for (const port of ports.keys()) {
+    try { port.postMessage({ type: 'remind', remainingMs }); } catch { /* port closed */ }
+  }
 }
 
 function postLimit(port, tabId) {

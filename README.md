@@ -45,12 +45,39 @@ on purpose, which is the point.
 The toolbar badge counts the remaining entertainment minutes down: green, then
 amber under ten minutes, then red at zero.
 
+## The corner indicator
+
+YouTube itself gets a small indicator in the top-right, which says a different
+thing depending on what you are doing:
+
+**Watching work & education** — a quiet green tick, always there, so you can stop
+wondering whether the clock is running. It fades to half opacity after a few
+seconds and comes back on hover.
+
+> ✓ Educational · off the clock
+
+**Watching entertainment** — nothing stands in the way. Instead a reminder slides
+in at each round figure of budget left (55m, 50m, 45m …) and fades after seven
+seconds. The step is configurable, or off.
+
+![The reminder](docs/corner-reminder.png)
+
+**Anywhere else — feeds, search, a paused video** — the explicit bar: which mode
+this tab is in, what is left of today's budget, and a button to switch mode
+without opening the popup.
+
+![The status bar](docs/corner-status.png)
+
+It follows the page into fullscreen (so does the limit overlay), stays out of the
+way when the limit overlay is up, and can be switched off entirely in Settings.
+
 ## Categories
 
 Each YouTube **tab** carries a category. New tabs start at whatever
-`New tabs count as` says (default: entertainment — the strict choice), and the
-popup flips the current tab between work and entertainment in one click. A tab
-left uncategorised books its time as yellow, not as entertainment.
+`New tabs count as` says (default: entertainment — the strict choice). The popup
+flips the current tab between work and entertainment in one click, and so does
+the button on the corner bar. A tab left uncategorised books its time as yellow,
+not as entertainment.
 
 ## Editing the record
 
@@ -110,7 +137,7 @@ docs/                    screenshots
 ## Development
 
 ```sh
-npm test                 # 29 tests: the model, the decision rule, the engine end-to-end
+npm test                 # 32 tests: the model, the decision rule, the engine end-to-end
 npm run icons            # regenerate icons/*.png
 npm run preview          # then open http://localhost:8777/test/preview.html
 ```
@@ -118,7 +145,9 @@ npm run preview          # then open http://localhost:8777/test/preview.html
 `test/engine.test.mjs` runs the real service worker against a stubbed `chrome.*`
 and a fake clock, so the counting rules are checked without a browser.
 `test/preview.html` and `test/preview-popup.html` render the real pages against
-seeded data, for looking at the UI without loading the extension.
+seeded data, and `test/preview-hud.html?mode=work|ent-toast|menu|blocked` renders
+the corner indicator over a mock YouTube — all three for looking at the UI without
+loading the extension.
 
 ## Colours
 
@@ -134,6 +163,8 @@ labelled in the legend, the tooltips and the entries table.
 - Chrome/Chromium, Manifest V3. Not tested on Firefox.
 - Tab categories live in session storage: they survive a service-worker restart,
   but reset when Chrome fully closes.
+- The corner indicator's clock ticks in whole minutes and updates every few
+  seconds, so a reminder can land a few seconds after the exact figure.
 - A sleeping machine or a suspended worker leaves a gap of up to a few seconds
   unbilled at each end. That is deliberate — a gap is never billed.
 - Editing a day that is still in progress discards at most the last few seconds of

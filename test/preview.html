@@ -118,6 +118,10 @@
     const doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('root').replaceWith(doc.querySelector('.wrap'));
     await import('../src/dashboard.js');
+    // #settings scrolls to the settings panel once the page has rendered
+    if (location.hash === '#settings') {
+      setTimeout(() => document.getElementById('settings').scrollIntoView({ block: 'center' }), 400);
+    }
     // #ent opens straight into the entertainment-only history view
     if (location.hash === '#ent') {
       setTimeout(() => document.querySelector('#mode-seg button[data-mode="ent"]').click(), 300);

@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- Dev harness for the on-page corner indicator. Renders content.js against a
+     stubbed chrome.* and a faked <video>, over a YouTube-ish backdrop.
+       npm run preview  ->  http://localhost:8777/test/preview-hud.html?mode=work
+     modes: work | ent | ent-toast | menu | blocked -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger — corner preview</title>
+  <style>
+    body { margin: 0; background: #0f0f0f; color: #f1f1f1;
+           font: 14px/1.5 Roboto, system-ui, sans-serif; }
+    .masthead { height: 56px; background: #0f0f0f; border-bottom: 1px solid #272727;
+                display: flex; align-items: center; padding: 0 16px; gap: 12px;
+                position: sticky; top: 0; }
+    .logo { font-weight: 700; letter-spacing: -.5px; }
+    .search { flex: 1; max-width: 500px; height: 34px; border: 1px solid #303030;
+              border-radius: 999px; background: #121212; }
+    .page { padding: 24px; display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+    .player { aspect-ratio: 16/9; background: linear-gradient(135deg, #1f1f24, #34343c);
+              border-radius: 12px; display: flex; align-items: center;
+              justify-content: center; color: #6b6b72; }
+    .side > div { height: 86px; background: #1c1c1c; border-radius: 10px; margin-bottom: 12px; }
+    .state { position: fixed; left: 16px; bottom: 16px; color: #8a8a85; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="masthead"><span class="logo">YouTube</span><span class="search"></span></div>
+  <div class="page">
+    <div class="player">(player)</div>
+    <div class="side"><div></div><div></div><div></div><div></div></div>
+  </div>
+  <div class="state" id="state"></div>
+
+  <script>
+    const mode = new URLSearchParams(location.search).get('mode') || 'work';
+    document.getElementById('state').textContent = `preview mode: ${mode}`;
+
+    // A <video> the content script will read as playing (or not).
+    const video = document.createElement('video');
+    const playing = mode !== 'menu';
+    Object.defineProperty(video, 'paused', { get: () => !playing });
+    Object.defineProperty(video, 'ended', { get: () => false });
+    Object.defineProperty(video, 'readyState', { get: () => 4 });
+    Object.defineProperty(video, 'muted', { get: () => false });
+    Object.defineProperty(video, 'volume', { get: () => 1 });
+    video.pause = () => {};
+    document.querySelector('.player').appendChild(video);
+
+    const inbound = [];
+    window.chrome = {
+      runtime: {
+        connect() {
+          return {
+            postMessage() {},
+            disconnect() {},
+            onMessage: { addListener: (fn) => inbound.push(fn) },
+            onDisconnect: { addListener() {} },
+          };
+        },
+        sendMessage(msg, cb) { if (cb) cb(true); },
+      },
+    };
+
+    const m = (x) => x * 60000;
+    const limit = {
+      type: 'limit',
+      blocked: mode === 'blocked',
+      category: mode === 'work' ? 'work' : 'ent',
+      usedMs: mode === 'blocked' ? m(60) : m(15),
+      limitMs: m(60),
+      blockEnabled: true,
+      hudEnabled: true,
+    };
+    const push = (msg) => { for (const fn of inbound) fn(msg); };
+
+    const s = document.createElement('script');
+    s.src = '../src/content.js';
+    s.onload = () => {
+      setTimeout(() => {
+        push(limit);
+        if (mode === 'ent-toast') setTimeout(() => push({ type: 'remind', remainingMs: m(45) }), 250);
+      }, 100);
+    };
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>

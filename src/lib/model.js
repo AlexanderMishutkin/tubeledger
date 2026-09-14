@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
   countBackground: true,  // count playback in a hidden/unfocused tab
   idleSeconds: 60,        // no input for this long => stop counting menu time
   blockEnabled: true,     // pause entertainment playback once the limit is hit
+  hudEnabled: true,       // show the corner indicator on YouTube itself
+  remindEveryMin: 5,      // while watching entertainment, remind at each step of this
 };
 
 const DAY_MS = 86400000;
@@ -160,6 +162,17 @@ export function fromLocalInput(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
   if (!m) return NaN;
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0).getTime();
+}
+
+/**
+ * Which reminder step a remaining-budget sits in, counting down. Rounded up, so
+ * the step changes exactly as the budget crosses a round figure: with a 5m
+ * interval, 50m01s is still step 11 and 50m00s is step 10. A reminder is due
+ * when this number drops, and `step * interval` is the round figure to announce.
+ */
+export function remindBucket(remainingMs, intervalMs) {
+  if (!(intervalMs > 0)) return null;
+  return Math.ceil(Math.max(0, remainingMs) / intervalMs);
 }
 
 export function clamp(n, lo, hi) {

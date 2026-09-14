@@ -91,7 +91,18 @@
         <label>Stop counting after
           <span class="field"><input type="number" id="set-idle" min="15" max="600" step="15"> <span class="dim">seconds idle</span></span>
         </label>
+        <label>Remind while watching entertainment
+          <span class="field">
+            <select id="set-remind">
+              <option value="0">Never</option>
+              <option value="5">Every 5 minutes</option>
+              <option value="10">Every 10 minutes</option>
+              <option value="15">Every 15 minutes</option>
+            </select>
+          </span>
+        </label>
         <label class="check"><input type="checkbox" id="set-bg"> Count playback in background tabs</label>
+        <label class="check"><input type="checkbox" id="set-hud"> Show the indicator in YouTube's corner</label>
         <label class="check"><input type="checkbox" id="set-block"> Pause entertainment once the limit is spent</label>
       </div>
       <div class="row-actions data-actions">
