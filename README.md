@@ -68,10 +68,11 @@ fades after seven seconds. The step is configurable, or off.
 
 ![The reminder](docs/corner-reminder.png)
 
-Where there is no header to dock into — fullscreen, or if YouTube rearranges its
-markup — the pill falls back to a floating card in the top-right corner. It stays
-out of the way when the limit overlay is up, and can be switched off entirely in
-Settings.
+**In fullscreen** there is no header to dock into — YouTube slides it away — so
+the pill and the reminder float in the same top-right corner, over the video:
+same information, same place. The same fallback covers YouTube rearranging its
+markup. The indicator stays out of the way when the limit overlay is up, and can
+be switched off entirely in Settings.
 
 ## Categories
 
@@ -152,8 +153,10 @@ npm run preview          # then open http://localhost:8777/test/preview.html
 and a fake clock, so the counting rules are checked without a browser.
 `test/preview.html` and `test/preview-popup.html` render the real pages against
 seeded data, and `test/preview-hud.html?mode=work|ent-toast|menu|blocked` renders
-the corner indicator over a mock YouTube — all three for looking at the UI without
-loading the extension.
+the indicator over a mock YouTube carrying YouTube's real masthead ids — add
+`&fs=1` for fullscreen (it stubs `document.fullscreenElement`, which is what the
+script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`. All three harnesses
+are for looking at the UI without loading the extension.
 
 ## Colours
 

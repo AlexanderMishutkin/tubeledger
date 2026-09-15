@@ -3,7 +3,8 @@
      stubbed chrome.* and a faked <video>, over a YouTube-ish backdrop.
        npm run preview  ->  http://localhost:8777/test/preview-hud.html?mode=work
      modes: work | ent | ent-toast | menu | blocked
-     add &theme=light, &nomasthead=1 (the fullscreen fallback), or &stale=1 -->
+     add &theme=light, &stale=1, &nomasthead=1, or &fs=1 (fakes fullscreen by
+     stubbing document.fullscreenElement, which is what the script reads) -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -67,8 +68,22 @@
     const params = new URLSearchParams(location.search);
     const mode = params.get('mode') || 'work';
     if (params.get('theme') !== 'light') document.documentElement.setAttribute('dark', '');
-    // No masthead = what fullscreen looks like: the pill falls back to floating.
     if (params.get('nomasthead')) document.querySelector('ytd-masthead').remove();
+
+    // Fullscreen, without needing a user gesture: the masthead stays in the DOM
+    // exactly as YouTube leaves it, and document.fullscreenElement is what the
+    // content script actually reads to decide where the pill goes.
+    if (params.get('fs')) {
+      const stage = document.createElement('div');
+      stage.id = 'fake-fullscreen';
+      stage.style.cssText = 'position:fixed;inset:0;z-index:50;background:'
+        + 'radial-gradient(circle at 42% 45%, #2b3346 0%, #0a0a0c 78%);'
+        + 'display:flex;align-items:center;justify-content:center;color:#5a5a66;font-size:13px';
+      stage.textContent = '(video, fullscreen)';
+      document.body.appendChild(stage);
+      Object.defineProperty(document, 'fullscreenElement', { get: () => stage, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    }
     document.getElementById('state').textContent = `preview mode: ${mode}`;
 
     // A <video> the content script will read as playing (or not).

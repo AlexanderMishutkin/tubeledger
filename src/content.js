@@ -12,7 +12,7 @@
   // unpacked extension does NOT replace this script in tabs that are already
   // open, so a tab can go on running an old build against a new worker. When
   // the worker reports a different version, the pill says so.
-  const BUILD = '0.3.0';
+  const BUILD = '0.3.1';
 
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;
@@ -20,7 +20,6 @@
   const HUD_ID = 'tubeledger-hud';
   const STYLE_ID = 'tubeledger-style';
   const TOAST_MS = 7000;
-  const CHIP_SETTLE_MS = 6000;
 
   let port = null;
   let lastSignature = '';
@@ -37,7 +36,6 @@
 
   let hudSignature = '';
   let toastTimer = null;
-  let settleTimer = null;
   let pillNode = null;   // lives in YouTube's masthead, or in the floating corner
 
   // ------------------------------------------------------------- detection
@@ -177,11 +175,8 @@
         background: rgba(22, 22, 21, .92); color: #fcfcfb;
         border: 1px solid rgba(255, 255, 255, .14); border-radius: 999px;
         padding: 6px 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .28);
-        backdrop-filter: blur(6px); transition: opacity .4s ease;
-        max-width: 320px;
+        backdrop-filter: blur(6px); max-width: 320px;
       }
-      #${HUD_ID} .tl-pill.tl-settled { opacity: .5; }
-      #${HUD_ID} .tl-pill:hover { opacity: 1; }
       #${HUD_ID} .tl-dot, .tl-dock .tl-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
       .tl-work-dot { background: #1a9b22; }
       .tl-ent-dot { background: #ec7268; }
@@ -283,16 +278,26 @@
   /**
    * YouTube's own masthead row, where the pill belongs: it is real header space,
    * so the pill never covers a video, a thumbnail or the filter chips. Returns
-   * null when there is no masthead to dock into — fullscreen, or a layout change
-   * at YouTube's end — and the floating corner takes over.
+   * null when there is nothing usable to dock into — and the floating corner
+   * takes over.
+   *
+   * Fullscreen is the case worth spelling out. YouTube does not remove the
+   * masthead there, it slides it out of the way, so it keeps a full-size box and
+   * "does it have a size" is not enough to tell: a pill docked into it in
+   * fullscreen is simply invisible. Any fullscreen at all means float instead.
    */
   function mastheadSlot() {
+    if (document.fullscreenElement) return null;
     const slot = document.querySelector('ytd-masthead #end #buttons')
       || document.querySelector('ytd-masthead #buttons')
       || document.querySelector('#masthead #end');
     if (!slot) return null;
+    if (slot.checkVisibility && !slot.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) {
+      return null;
+    }
     const rect = slot.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 ? slot : null;
+    const onScreen = rect.bottom > 0 && rect.top < (window.innerHeight || 0);
+    return rect.width > 0 && rect.height > 0 && onScreen ? slot : null;
   }
 
   /** The floating corner: home of the reminder, and of the pill when undocked. */
@@ -365,7 +370,6 @@
 
     if (pillNode) pillNode.remove();
     pillNode = null;
-    clearTimeout(settleTimer);
     if (!wanted) {
       if (!document.querySelector(`#${HUD_ID} .tl-toast`)) removeFloatRoot();
       return;
@@ -376,8 +380,7 @@
       slot.insertBefore(pillNode, slot.firstChild);
       if (!document.querySelector(`#${HUD_ID} .tl-toast`)) removeFloatRoot();
     } else {
-      hudRoot().appendChild(pillNode);
-      settleTimer = setTimeout(() => pillNode && pillNode.classList.add('tl-settled'), CHIP_SETTLE_MS);
+      hudRoot().appendChild(pillNode); // fullscreen, or a masthead we cannot find
     }
   }
 
