@@ -103,9 +103,12 @@
         </label>
         <label class="check"><input type="checkbox" id="set-bg"> Count playback in background tabs</label>
         <label class="check"><input type="checkbox" id="set-hud"> Show the indicator in YouTube's corner</label>
+        <label class="check"><input type="checkbox" id="set-backup"> Save a backup file to Downloads once a day</label>
         <label class="check"><input type="checkbox" id="set-block"> Pause entertainment once the limit is spent</label>
       </div>
+      <p class="dim backup-line" id="backup-status"></p>
       <div class="row-actions data-actions">
+        <button id="backup-now">Back up now</button>
         <button id="export">Export JSON</button>
         <button id="import">Import JSON</button>
         <input type="file" id="import-file" accept="application/json" hidden>

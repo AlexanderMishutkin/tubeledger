@@ -1,6 +1,6 @@
 // Hand-rolled SVG charts. No libraries, no innerHTML — every node is created
 // through the DOM API so the whole extension stays auditable by reading it.
-import { CLASS_LABEL, fmtClock, fmtDuration } from './model.js';
+import { CLASS_LABEL, fmtClock, fmtDuration, stackParts } from './model.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -21,6 +21,7 @@ export function tokens() {
     workBg: get('--c-work-bg'),
     entBg: get('--c-ent-bg'),
     menuBg: get('--c-menu-bg'),
+    over: get('--c-ent-over'),
     surface: get('--surface-1'),
     line: get('--line'),
     lineStrong: get('--line-strong'),
@@ -201,7 +202,9 @@ function roundedTopPath(x, y, w, h, r) {
 }
 
 /**
- * One column per day, stacked work / entertainment / menu.
+ * One column per day. Entertainment sits at the bottom of every stack so it can
+ * be read against the limit line, and whatever went over the line is drawn in
+ * its own colour.
  * @param {object} opts {days:[{key, totals}], mode:'all'|'ent', limitMs, onPick, selectedKey}
  */
 export function renderDailyBars(host, opts) {
@@ -216,7 +219,7 @@ export function renderDailyBars(host, opts) {
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
 
-  const stackOrder = mode === 'ent' ? ['ent'] : ['work', 'ent', 'menu'];
+  const stackOrder = mode === 'ent' ? ['ent'] : ['ent', 'work', 'menu'];
   const dayTotal = (d) => stackOrder.reduce((sum, c) => sum + (d.totals[c] || 0), 0);
   const peak = Math.max(1, ...days.map(dayTotal), mode === 'ent' ? limitMs : 0);
   const stepMs = niceStep(peak);
@@ -245,28 +248,45 @@ export function renderDailyBars(host, opts) {
     svg.appendChild(label);
   }
 
+  // The one day that went furthest over gets a direct label; the rest stay clean.
+  let worst = null;
+  for (const d of days) {
+    const over = (d.totals.ent || 0) - limitMs;
+    if (limitMs > 0 && over > 0 && (!worst || over > worst.over)) worst = { key: d.key, over };
+  }
+
   days.forEach((d, i) => {
     const x0 = padL + i * bandW + (bandW - barW) / 2;
-    let cursor = 0;
-    const parts = [];
-    for (const c of stackOrder) {
-      const ms = d.totals[c] || 0;
-      if (ms <= 0) continue;
-      parts.push({ c, ms, from: cursor });
-      cursor += ms;
-    }
+    const parts = stackParts(d.totals, stackOrder, limitMs);
     parts.forEach((part, idx) => {
       const isTop = idx === parts.length - 1;
       const yTop = y(part.from + part.ms);
       const yBottom = y(part.from);
       // 2px surface gap between stacked segments, drawn by shortening the mark.
       const h = Math.max(1, yBottom - yTop - (idx > 0 ? 2 : 0));
+      const fill = t[part.c];
       const node = isTop
-        ? svgEl('path', { d: roundedTopPath(x0, yTop, barW, h, 4), fill: t[part.c === 'work' ? 'work' : part.c] })
-        : svgEl('rect', { x: x0, y: yTop, width: barW, height: h, fill: t[part.c] });
-      node.setAttribute('fill', t[part.c]);
+        ? svgEl('path', { d: roundedTopPath(x0, yTop, barW, h, 4), fill })
+        : svgEl('rect', { x: x0, y: yTop, width: barW, height: h, fill });
       svg.appendChild(node);
     });
+
+    if (worst && worst.key === d.key) {
+      // Keep the label inside the box: at the edges it hangs off the column instead.
+      const mid = x0 + barW / 2;
+      const nearRight = mid > width - padR - 42;
+      const nearLeft = mid < padL + 42;
+      const label = svgEl('text', {
+        x: nearRight ? width - padR : nearLeft ? padL : mid,
+        y: Math.max(padT + 9, y(dayTotal(d)) - 7),
+        'text-anchor': nearRight ? 'end' : nearLeft ? 'start' : 'middle',
+        fill: t.text2, 'font-size': 10, 'font-weight': 600,
+        stroke: t.surface, 'stroke-width': 3, 'paint-order': 'stroke fill',
+        'stroke-linejoin': 'round',
+      });
+      label.textContent = `+${fmtDuration(worst.over)} over`;
+      svg.appendChild(label);
+    }
 
     // Hit target covers the whole band, not just the mark.
     const hit = svgEl('rect', {
@@ -274,15 +294,18 @@ export function renderDailyBars(host, opts) {
       fill: 'transparent', class: 'band', tabindex: 0, role: 'button',
     });
     const total = dayTotal(d);
-    hit.setAttribute('aria-label', `${d.key}: ${fmtDuration(total)}`);
+    const over = limitMs > 0 ? (d.totals.ent || 0) - limitMs : 0;
+    hit.setAttribute('aria-label',
+      `${d.key}: ${fmtDuration(total)}${over > 0 ? `, ${fmtDuration(over)} over the limit` : ''}`);
     const lines = [
       { text: prettyDate(d.key), strong: true },
       ...stackOrder.map((c) => ({
         text: `${CLASS_LABEL[c]}: ${fmtDuration(d.totals[c] || 0)}`,
         swatch: t[c],
       })),
-      { text: `Total: ${fmtDuration(total)}`, dim: true },
     ];
+    if (over > 0) lines.push({ text: `Over the limit by ${fmtDuration(over)}`, swatch: t.over, strong: true });
+    lines.push({ text: `Total: ${fmtDuration(total)}`, dim: true });
     hit.addEventListener('mousemove', (e) => showTip(e, lines));
     hit.addEventListener('mouseleave', hideTip);
     hit.addEventListener('click', () => onPick && onPick(d.key));
@@ -309,19 +332,19 @@ export function renderDailyBars(host, opts) {
     }
   });
 
-  // The budget line only makes sense against the entertainment-only view.
-  if (mode === 'ent' && limitMs > 0) {
+  // Entertainment starts at the baseline in both views, so the line reads in both.
+  if (limitMs > 0 && limitMs <= top) {
     const py = Math.round(y(limitMs)) + 0.5;
     svg.appendChild(svgEl('line', {
       x1: padL, y1: py, x2: width - padR, y2: py, stroke: t.text2, 'stroke-width': 1,
     }));
     // A halo in the surface colour keeps the label readable where a column runs under it.
     const label = svgEl('text', {
-      x: padL + 5, y: py - 6, 'text-anchor': 'start', fill: t.text2, 'font-size': 10,
+      x: padL + 4, y: py + 12, 'text-anchor': 'start', fill: t.text2, 'font-size': 10,
       stroke: t.surface, 'stroke-width': 4, 'paint-order': 'stroke fill',
       'stroke-linejoin': 'round',
     });
-    label.textContent = `limit ${fmtDuration(limitMs)}`;
+    label.textContent = `daily limit ${fmtDuration(limitMs)}`;
     svg.appendChild(label);
   }
 

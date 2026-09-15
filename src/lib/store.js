@@ -59,7 +59,13 @@ export async function listDayKeys() {
 
 export async function exportAll() {
   const all = await chrome.storage.local.get(null);
-  return { format: 'tubeledger/1', exported: new Date().toISOString(), data: all };
+  // Settings are written out even when they have never been changed, so a restored
+  // file brings back the same setup rather than silently falling back to defaults.
+  return {
+    format: 'tubeledger/1',
+    exported: new Date().toISOString(),
+    data: { ...all, settings: await getSettings() },
+  };
 }
 
 export async function importAll(payload, { replace = false } = {}) {
@@ -68,6 +74,18 @@ export async function importAll(payload, { replace = false } = {}) {
   }
   if (replace) await chrome.storage.local.clear();
   await chrome.storage.local.set(payload.data);
+}
+
+const BACKUP_KEY = 'backup';
+
+export async function getBackupMeta() {
+  const got = await chrome.storage.local.get(BACKUP_KEY);
+  return got[BACKUP_KEY] || {};
+}
+
+export async function setBackupMeta(meta) {
+  await chrome.storage.local.set({ [BACKUP_KEY]: meta });
+  return meta;
 }
 
 export function newId(startMs) {

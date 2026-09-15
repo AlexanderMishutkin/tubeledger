@@ -82,6 +82,33 @@ flips the current tab between work and entertainment in one click, and so does
 the button on the corner bar. A tab left uncategorised books its time as yellow,
 not as entertainment.
 
+## Backups
+
+`chrome.storage.local` survives browser restarts, but not a wiped profile or a
+removed extension. So the ledger also goes to a file: a **full export, once a
+logical day**, into your Downloads folder.
+
+```
+Downloads/TubeLedger/tubeledger-latest.json   always the newest
+Downloads/TubeLedger/tubeledger-2026-09.json  one per month
+```
+
+Two files on purpose — a bad day cannot quietly overwrite the only copy you have.
+Both are exactly the format **Import JSON** accepts, so restoring is: Settings →
+Import JSON → pick the file.
+
+A service worker cannot make a blob URL, so the JSON travels to Chrome as a
+`data:` URL. Whether that actually lands is **not assumed**: the download is
+looked up afterwards and the dashboard reports what Chrome said happened — *Last
+backup 16/09/2026, 04:12 → Downloads/TubeLedger/…*, or the failure in plain
+words. A backup that is quietly failing cannot look like one that is working.
+**Back up now** runs the same path on demand; **Export JSON** saves a copy
+straight from the page and does not depend on it at all.
+
+Chrome extensions can only write inside Downloads, so the location is not
+configurable. Switch the whole thing off in Settings if you would rather not see
+a daily download appear.
+
 ## Editing the record
 
 Every entry on the dashboard can be re-typed, moved between *watching* and
@@ -111,6 +138,7 @@ puzzling.
 | `storage` | the ledger and the settings, local only |
 | `alarms` | a one-minute heartbeat so the worker closes an open session after the last YouTube tab goes away |
 | `idle` | to stop counting menu time when you walk away |
+| `downloads` | to write the daily backup file into your Downloads folder |
 | `*://*.youtube.com/*` | the content script that reports play/pause and pauses playback at the limit |
 
 There is no `tabs` permission: the extension never reads a tab's URL or title. It
@@ -144,7 +172,7 @@ docs/                    screenshots
 ## Development
 
 ```sh
-npm test                 # 32 tests: the model, the decision rule, the engine end-to-end
+npm test                 # 41 tests: the model, the decision rule, the engine end-to-end
 npm run icons            # regenerate icons/*.png
 npm run preview          # then open http://localhost:8777/test/preview.html
 ```
@@ -158,9 +186,23 @@ the indicator over a mock YouTube carrying YouTube's real masthead ids — add
 script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`. All three harnesses
 are for looking at the UI without loading the extension.
 
+## The daily chart
+
+Entertainment sits at the **bottom** of every stacked column, because it is the
+one series measured against a line and a segment only reads against a line when
+it starts from the baseline. The daily limit is drawn across both views, and
+whatever went **over** it is split off into its own bright colour, with the worst
+day of the month labelled outright.
+
+That colour is magenta rather than a brighter red, which is not a style choice:
+dark-mode entertainment is already a light red, so every brighter red sits under
+ΔE 15 against it — indistinguishable even with full colour vision, never mind
+colour blindness. Magenta clears every gate in both themes (CVD ΔE 9.2 light /
+13.3 dark, normal-vision 19.9 / 15.9).
+
 ## Colours
 
-The palette is checked, not eyeballed: green/amber/red with a large enough
+The rest of the palette is checked the same way, not eyeballed: green/amber/red with a large enough
 lightness spread that the pairs stay apart under red-green colour blindness
 (worst-pair ΔE 14.7 light, 8.5 dark, against a ≥8 target), in both light and dark
 themes. Background playback is the muted step of the same hue **plus a 45° hatch**,

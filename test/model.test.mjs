@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dayKey, dayBounds, shiftDay, dayRange, splitByDay, totals, mergeAdjacent,
-  fmtDuration, normalize, remindBucket,
+  fmtDuration, normalize, remindBucket, stackParts,
 } from '../src/lib/model.js';
 
 const at = (y, m, d, h, min = 0) => new Date(y, m - 1, d, h, min, 0, 0).getTime();
@@ -118,4 +118,41 @@ test('reminder steps change exactly on the round figures', () => {
   assert.equal(remindBucket(10 * 60000, 0), null, 'reminders off');
   // The figure announced is the step times the interval: a round number.
   assert.equal(remindBucket(45 * 60000, five) * five, 45 * 60000);
+});
+
+const ORDER = ['ent', 'work', 'menu'];
+const mins = (n) => n * 60000;
+
+test('a day inside the limit stacks as one entertainment block', () => {
+  const parts = stackParts({ ent: mins(40), work: mins(20) }, ORDER, mins(60));
+  assert.deepEqual(parts, [
+    { c: 'ent', ms: mins(40), from: 0 },
+    { c: 'work', ms: mins(20), from: mins(40) },
+  ]);
+});
+
+test('a day over the limit splits at the line, and the rest stacks above', () => {
+  const parts = stackParts({ ent: mins(95), work: mins(30), menu: mins(10) }, ORDER, mins(60));
+  assert.deepEqual(parts, [
+    { c: 'ent', ms: mins(60), from: 0 },          // up to the line
+    { c: 'over', ms: mins(35), from: mins(60) },  // and the part that went past it
+    { c: 'work', ms: mins(30), from: mins(95) },
+    { c: 'menu', ms: mins(10), from: mins(125) },
+  ]);
+});
+
+test('entertainment starts at the baseline, so it can be read against the line', () => {
+  const [first] = stackParts({ ent: mins(5), work: mins(180) }, ORDER, mins(60));
+  assert.equal(first.c, 'ent');
+  assert.equal(first.from, 0);
+});
+
+test('with no limit set, nothing is ever marked as over', () => {
+  const parts = stackParts({ ent: mins(300) }, ORDER, 0);
+  assert.deepEqual(parts, [{ c: 'ent', ms: mins(300), from: 0 }]);
+});
+
+test('empty classes leave no zero-height marks behind', () => {
+  assert.deepEqual(stackParts({ ent: 0, work: mins(10), menu: 0 }, ORDER, mins(60)),
+    [{ c: 'work', ms: mins(10), from: 0 }]);
 });

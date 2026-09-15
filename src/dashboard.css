@@ -60,4 +60,6 @@ tbody tr.running td { font-style: italic; }
 .data-actions { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 button.danger { border-color: var(--c-ent); color: var(--c-ent); }
 .warn { color: var(--c-ent); font-size: 12px; margin: 0 0 8px; }
+.backup-line { font-size: 12px; margin: 14px 0 0; }
+.backup-line.warn { color: var(--c-ent-over); font-weight: 500; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

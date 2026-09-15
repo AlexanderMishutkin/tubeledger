@@ -45,6 +45,7 @@ async function reload() {
 
 function render() {
   $('day-title').textContent = prettyDate(viewKey);
+  drawBackupStatus();
   $('next-day').disabled = viewKey >= dayKey(Date.now(), settings.dayStartHour);
   drawStats();
   drawLegend();
@@ -135,14 +136,22 @@ function drawLegend() {
     host.appendChild(item);
   }
 
+  // Legend order follows the stack, bottom-up, so the chart reads top to bottom.
   const hist = $('history-legend');
   hist.replaceChildren();
-  for (const c of (mode === 'ent' ? ['ent'] : ['work', 'ent', 'menu'])) {
+  const limitMs = settings.entLimitMin * 60000;
+  const histRows = (mode === 'ent' ? ['ent'] : ['ent', 'work', 'menu'])
+    .map((c) => [colorFor(c, false), CLASS_LABEL[c]]);
+  if (limitMs > 0 && history.some((d) => (d.totals.ent || 0) > limitMs)) {
+    histRows.push([getComputedStyle(document.documentElement).getPropertyValue('--c-ent-over').trim(),
+      'Over the limit']);
+  }
+  for (const [color, text] of histRows) {
     const item = document.createElement('span');
     const sw = document.createElement('span');
     sw.className = 'swatch';
-    sw.style.background = colorFor(c, false);
-    item.append(sw, document.createTextNode(CLASS_LABEL[c]));
+    sw.style.background = color;
+    item.append(sw, document.createTextNode(text));
     hist.appendChild(item);
   }
 }
@@ -343,6 +352,41 @@ $('add-entry').addEventListener('click', async () => {
   await commit([...segments, seg]);
 });
 
+// ---------------------------------------------------------------- backups
+
+/**
+ * Says plainly whether the last backup actually landed. The worker can only ask
+ * Chrome to write the file; this reports what Chrome said happened, so a backup
+ * that is quietly failing cannot look like one that is working.
+ */
+function drawBackupStatus() {
+  const node = $('backup-status');
+  const meta = (snapshot && snapshot.backup) || {};
+  node.classList.remove('warn');
+  if (!settings.backupEnabled) {
+    node.textContent = 'Automatic backups are off. Export JSON still works.';
+    return;
+  }
+  if (meta.error) {
+    node.classList.add('warn');
+    node.textContent = `Last backup failed: ${meta.error}. Use Export JSON to save a copy by hand.`;
+    return;
+  }
+  if (!meta.lastAt) {
+    node.textContent = 'No backup written yet — the first one runs on the next day change.';
+    return;
+  }
+  const when = new Date(meta.lastAt);
+  const files = (meta.files || []).join(' and ');
+  node.textContent = `Last backup ${when.toLocaleString()} → Downloads/${files}`;
+}
+
+$('backup-now').addEventListener('click', async () => {
+  $('backup-status').textContent = 'Backing up…';
+  snapshot = await chrome.runtime.sendMessage({ type: 'backupNow' }).catch(() => null);
+  drawBackupStatus();
+});
+
 // ----------------------------------------------------------------- chrome
 
 for (const btn of document.querySelectorAll('#mode-seg button')) {
@@ -383,6 +427,7 @@ function fillSettings() {
   $('set-idle').value = settings.idleSeconds;
   $('set-bg').checked = !!settings.countBackground;
   $('set-hud').checked = !!settings.hudEnabled;
+  $('set-backup').checked = !!settings.backupEnabled;
   $('set-remind').value = String(settings.remindEveryMin);
   $('set-block').checked = !!settings.blockEnabled;
 }
@@ -395,6 +440,7 @@ async function onSettingChange() {
     idleSeconds: clamp(Number($('set-idle').value) || 60, 15, 600),
     countBackground: $('set-bg').checked,
     hudEnabled: $('set-hud').checked,
+    backupEnabled: $('set-backup').checked,
     remindEveryMin: clamp(Number($('set-remind').value) || 0, 0, 60),
     blockEnabled: $('set-block').checked,
   });
@@ -407,7 +453,8 @@ async function onSettingChange() {
   await reload();
 }
 
-for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block', 'set-hud', 'set-remind']) {
+for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block',
+  'set-hud', 'set-remind', 'set-backup']) {
   $(id).addEventListener('change', onSettingChange);
 }
 

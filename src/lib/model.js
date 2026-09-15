@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   blockEnabled: true,     // pause entertainment playback once the limit is hit
   hudEnabled: true,       // show the corner indicator on YouTube itself
   remindEveryMin: 5,      // while watching entertainment, remind at each step of this
+  backupEnabled: true,    // write a JSON backup to Downloads once a day
 };
 
 const DAY_MS = 86400000;
@@ -162,6 +163,33 @@ export function fromLocalInput(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
   if (!m) return NaN;
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0).getTime();
+}
+
+/**
+ * Lay a day out as a stack, bottom first, splitting entertainment at the limit so
+ * the part that went over can be drawn in its own colour. Entertainment sits at
+ * the bottom of the stack on purpose: it is the one measured against a line, and
+ * a segment only reads against a line when it starts from the baseline.
+ *
+ * @returns {Array<{c:'ent'|'over'|'work'|'menu', ms:number, from:number}>} bottom-up
+ */
+export function stackParts(dayTotals, order, limitMs) {
+  const parts = [];
+  let cursor = 0;
+  for (const c of order) {
+    const ms = dayTotals[c] || 0;
+    if (ms <= 0) continue;
+    if (c === 'ent' && limitMs > 0 && ms > limitMs) {
+      parts.push({ c: 'ent', ms: limitMs, from: cursor });
+      cursor += limitMs;
+      parts.push({ c: 'over', ms: ms - limitMs, from: cursor });
+      cursor += ms - limitMs;
+    } else {
+      parts.push({ c, ms, from: cursor });
+      cursor += ms;
+    }
+  }
+  return parts;
 }
 
 /**

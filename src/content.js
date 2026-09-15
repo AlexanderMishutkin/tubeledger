@@ -12,7 +12,7 @@
   // unpacked extension does NOT replace this script in tabs that are already
   // open, so a tab can go on running an old build against a new worker. When
   // the worker reports a different version, the pill says so.
-  const BUILD = '0.3.1';
+  const BUILD = '0.4.0';
 
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;

@@ -12,6 +12,7 @@ globalThis.setInterval = () => 0; // the worker's keepalive would hang the test 
 const store = {};
 const session = {};
 const listeners = { connect: [], message: [], alarm: [] };
+const downloads = [];
 let badge = '';
 
 globalThis.chrome = {
@@ -35,6 +36,10 @@ globalThis.chrome = {
     },
   },
   alarms: { create() {}, onAlarm: { addListener: (fn) => listeners.alarm.push(fn) } },
+  downloads: {
+    async download(opts) { downloads.push(opts); return downloads.length; },
+    async search({ id }) { return [{ id, state: 'complete' }]; },
+  },
   idle: {
     setDetectionInterval() {},
     queryState: (_s, cb) => cb('active'),
@@ -233,6 +238,45 @@ test('work & education time is never nudged and never blocked', async () => {
   assert.deepEqual(tab.reminders(), [], 'no nudges for educational viewing');
   assert.equal(tab.inbox.filter((m) => m.type === 'limit' && m.blocked).length, 0, 'never blocked');
   assert.equal(totals(store['d:2026-09-17'] || []).work, 40 * 60000);
+});
+
+test('a new day writes a backup file that reads back as a full export', async () => {
+  const before = downloads.length;
+  now = new Date(2026, 8, 18, 12, 0, 0, 0).getTime(); // a day the ledger has not seen
+  const tab = openTab(9);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCHING);
+  await hold(tab, 60, WATCHING);
+  await settle();
+  await settle();
+
+  const written = downloads.slice(before);
+  assert.deepEqual(written.map((d) => d.filename), [
+    'TubeLedger/tubeledger-latest.json',
+    'TubeLedger/tubeledger-2026-09.json',
+  ], 'one always-current file and one for the month');
+  assert.equal(written[0].conflictAction, 'overwrite');
+  assert.equal(written[0].saveAs, false);
+
+  const [, base64] = written[0].url.split(',');
+  const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+  assert.equal(payload.format, 'tubeledger/1', 'the same format Import JSON accepts');
+  const dayKeys = Object.keys(payload.data).filter((k) => k.startsWith('d:'));
+  assert.ok(dayKeys.length >= 3, `carries the whole history, got ${dayKeys.length} days`);
+  assert.ok(payload.data.settings, 'and the settings');
+
+  const settled = downloads.length;
+  await hold(tab, 120, WATCHING);
+  await settle();
+  assert.equal(downloads.length, settled, 'once a day, not once a tick');
+  await tab.close();
+});
+
+test('the backup outcome is recorded, not assumed', async () => {
+  const snap = await ask({ type: 'getSnapshot' });
+  assert.equal(snap.backup.error, null, 'no error when Chrome says the download completed');
+  assert.equal(snap.backup.lastDay, '2026-09-18');
+  assert.ok(snap.backup.lastAt > 0);
 });
 
 test.after(() => { Date.now = realNow; });

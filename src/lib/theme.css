@@ -20,6 +20,7 @@
   --c-work-bg: #3c9640;
   --c-ent-bg: #92403b;
   --c-menu-bg: #d6aa4a;
+  --c-ent-over: #e0197f;
 
   --radius: 10px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -43,6 +44,7 @@
     --c-work-bg: #3c9640;
     --c-ent-bg: #cf7971;
     --c-menu-bg: #dab353;
+    --c-ent-over: #f050c0;
   }
 }
 
@@ -63,6 +65,7 @@
   --c-work-bg: #3c9640;
   --c-ent-bg: #cf7971;
   --c-menu-bg: #dab353;
+  --c-ent-over: #f050c0;
 }
 
 * { box-sizing: border-box; }
@@ -127,6 +130,7 @@ input, select {
 .sw-work-bg { background: var(--c-work-bg); }
 .sw-ent-bg { background: var(--c-ent-bg); }
 .sw-menu-bg { background: var(--c-menu-bg); }
+.sw-over { background: var(--c-ent-over); }
 .sw-hatch {
   background-image: repeating-linear-gradient(
     45deg, rgba(255,255,255,.55) 0 1.5px, transparent 1.5px 4px);
