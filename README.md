@@ -85,29 +85,35 @@ not as entertainment.
 ## Backups
 
 `chrome.storage.local` survives browser restarts, but not a wiped profile or a
-removed extension. So the ledger also goes to a file: a **full export, once a
-logical day**, into your Downloads folder.
+removed extension. So the ledger also goes to a file — **quietly**.
+
+Pick a folder once in Settings (*Choose backup folder…*) and a full export is
+written there once a logical day:
 
 ```
-Downloads/TubeLedger/tubeledger-latest.json   always the newest
-Downloads/TubeLedger/tubeledger-2026-09.json  one per month
+<your folder>/tubeledger-latest.json   always the newest
+<your folder>/tubeledger-2026-09.json  one per month
 ```
 
 Two files on purpose — a bad day cannot quietly overwrite the only copy you have.
 Both are exactly the format **Import JSON** accepts, so restoring is: Settings →
 Import JSON → pick the file.
 
-A service worker cannot make a blob URL, so the JSON travels to Chrome as a
-`data:` URL. Whether that actually lands is **not assumed**: the download is
-looked up afterwards and the dashboard reports what Chrome said happened — *Last
-backup 16/09/2026, 04:12 → Downloads/TubeLedger/…*, or the failure in plain
-words. A backup that is quietly failing cannot look like one that is working.
-**Back up now** runs the same path on demand; **Export JSON** saves a copy
-straight from the page and does not depend on it at all.
+This uses the File System Access API, which writes straight into the folder with
+**no download bubble and no prompt**. The trade-off is that it only works from an
+extension page, never from the service worker, so the write happens when the
+popup or the dashboard is next opened rather than on a timer. The popup is opened
+most days; nothing is at risk in the meantime, since `chrome.storage.local` is
+still the live store and this is only the copy that outlives it.
 
-Chrome extensions can only write inside Downloads, so the location is not
-configurable. Switch the whole thing off in Settings if you would rather not see
-a daily download appear.
+Chrome sometimes pauses a stored folder permission after a restart. That is
+visible, not silent: the dashboard says so, and the popup shows a line you can
+click. One press of **Back up now** restores it.
+
+> An earlier version did this with `chrome.downloads`, which worked but popped the
+> download bubble every time — and, worse, wrote its "already done today" marker
+> only after an `await` that a service worker does not always survive, so it could
+> repeat on every worker wake. Both are why the mechanism changed.
 
 ## Editing the record
 
@@ -138,7 +144,6 @@ puzzling.
 | `storage` | the ledger and the settings, local only |
 | `alarms` | a one-minute heartbeat so the worker closes an open session after the last YouTube tab goes away |
 | `idle` | to stop counting menu time when you walk away |
-| `downloads` | to write the daily backup file into your Downloads folder |
 | `*://*.youtube.com/*` | the content script that reports play/pause and pauses playback at the limit |
 
 There is no `tabs` permission: the extension never reads a tab's URL or title. It
@@ -191,8 +196,9 @@ are for looking at the UI without loading the extension.
 Entertainment sits at the **bottom** of every stacked column, because it is the
 one series measured against a line and a segment only reads against a line when
 it starts from the baseline. The daily limit is drawn across both views, and
-whatever went **over** it is split off into its own bright colour, with the worst
-day of the month labelled outright.
+whatever went **over** it is split off: a gradient running hot toward the top, a
+bright cap line, and a glow around the mark — the one thing in the chart allowed
+to be loud. The worst day of the month is labelled outright.
 
 That colour is magenta rather than a brighter red, which is not a style choice:
 dark-mode entertainment is already a light red, so every brighter red sits under

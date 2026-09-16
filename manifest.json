@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "TubeLedger",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Tracks how your YouTube hours split between work, entertainment and menus — and stops entertainment at a daily limit.",
   "minimum_chrome_version": "110",
-  "permissions": ["storage", "alarms", "idle", "downloads"],
+  "permissions": ["storage", "alarms", "idle"],
   "host_permissions": ["*://*.youtube.com/*"],
   "background": {
     "service_worker": "src/background.js",

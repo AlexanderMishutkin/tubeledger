@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dayKey, dayBounds, shiftDay, dayRange, splitByDay, totals, mergeAdjacent,
-  fmtDuration, normalize, remindBucket, stackParts,
+  fmtDuration, normalize, remindBucket, stackParts, backupFilenames, needsBackup,
 } from '../src/lib/model.js';
 
 const at = (y, m, d, h, min = 0) => new Date(y, m - 1, d, h, min, 0, 0).getTime();
@@ -155,4 +155,18 @@ test('with no limit set, nothing is ever marked as over', () => {
 test('empty classes leave no zero-height marks behind', () => {
   assert.deepEqual(stackParts({ ent: 0, work: mins(10), menu: 0 }, ORDER, mins(60)),
     [{ c: 'work', ms: mins(10), from: 0 }]);
+});
+
+test('a backup writes one current file and one per month', () => {
+  assert.deepEqual(backupFilenames('2026-09-16'),
+    ['tubeledger-latest.json', 'tubeledger-2026-09.json']);
+  assert.deepEqual(backupFilenames('2026-12-01'),
+    ['tubeledger-latest.json', 'tubeledger-2026-12.json']);
+});
+
+test('a backup is due once a day — not once a launch', () => {
+  assert.equal(needsBackup(null, '2026-09-16'), true, 'never backed up');
+  assert.equal(needsBackup({}, '2026-09-16'), true);
+  assert.equal(needsBackup({ lastDay: '2026-09-15' }, '2026-09-16'), true, 'the day rolled over');
+  assert.equal(needsBackup({ lastDay: '2026-09-16' }, '2026-09-16'), false, 'already done today');
 });

@@ -1,5 +1,6 @@
 import { CLASS_LABEL, fmtDuration } from './lib/model.js';
 import { prettyDate } from './lib/charts.js';
+import { supported as fsSupported, backupIfDue } from './lib/fsbackup.js';
 
 const $ = (id) => document.getElementById(id);
 let activeTabId = null;
@@ -119,6 +120,25 @@ for (const btn of document.querySelectorAll('.seg button')) {
   });
 }
 
+/**
+ * The popup is the page that gets opened most often, so it is where the daily
+ * backup actually happens: one silent write, no picker, no download bubble.
+ */
+async function backupOnOpen() {
+  if (!snapshot || !snapshot.settings.backupEnabled || !fsSupported()) return;
+  const meta = await backupIfDue(snapshot.dayKey);
+  const hint = $('backup-hint');
+  if (meta && meta.needsReconnect) {
+    hint.textContent = 'Backup folder needs reconnecting — open the dashboard';
+    hint.hidden = false;
+  }
+}
+
+$('backup-hint').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'openDashboard' });
+  window.close();
+});
+
 $('open-dash').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'openDashboard' });
   window.close();
@@ -128,5 +148,6 @@ $('open-dash').addEventListener('click', () => {
   const tab = await findActiveTab();
   activeTabId = tab ? tab.id : null;
   await refresh();
+  backupOnOpen();
   setInterval(refresh, 1000);
 })();

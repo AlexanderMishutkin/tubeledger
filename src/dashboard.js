@@ -4,7 +4,11 @@ import {
 } from './lib/model.js';
 import {
   getSettings, saveSettings, getDay, getDays, setDay, exportAll, importAll, newId, listDayKeys,
+  getBackupMeta,
 } from './lib/store.js';
+import {
+  supported as fsSupported, storedFolder, folderState, chooseFolder, reconnect, backupIfDue,
+} from './lib/fsbackup.js';
 import {
   renderTimeline, renderDailyBars, colorFor, prettyDate, hideTip,
 } from './lib/charts.js';
@@ -26,6 +30,7 @@ async function boot() {
   viewKey = dayKey(Date.now(), settings.dayStartHour);
   fillSettings();
   await reload();
+  backupOnOpen();
   setInterval(async () => {
     // The day in progress keeps growing underneath us.
     if (viewKey === dayKey(Date.now(), settings.dayStartHour)) await reload();
@@ -355,37 +360,73 @@ $('add-entry').addEventListener('click', async () => {
 // ---------------------------------------------------------------- backups
 
 /**
- * Says plainly whether the last backup actually landed. The worker can only ask
- * Chrome to write the file; this reports what Chrome said happened, so a backup
- * that is quietly failing cannot look like one that is working.
+ * Says plainly where the backup stands. A backup that is quietly not happening
+ * must never look like one that is working, so every state has its own sentence.
  */
-function drawBackupStatus() {
+async function drawBackupStatus() {
   const node = $('backup-status');
-  const meta = (snapshot && snapshot.backup) || {};
+  if (!node.textContent) node.textContent = 'Checking the backup folder…';
+  const meta = await getBackupMeta();
+  const handle = await storedFolder();
+  const state = await folderState(handle);
   node.classList.remove('warn');
+  $('backup-folder').textContent = handle ? `Folder: ${handle.name} — change…` : 'Choose backup folder…';
+  $('backup-now').disabled = !handle;
+
+  if (!fsSupported()) {
+    node.textContent = 'This browser cannot write to a folder directly. Use Export JSON to save a copy.';
+    return;
+  }
   if (!settings.backupEnabled) {
-    node.textContent = 'Automatic backups are off. Export JSON still works.';
+    node.textContent = 'Backups are off. Export JSON still saves a copy whenever you want one.';
+    return;
+  }
+  if (!handle) {
+    node.textContent = 'Pick a folder and the ledger is written there once a day — quietly, no downloads.';
+    return;
+  }
+  if (state !== 'granted') {
+    node.classList.add('warn');
+    node.textContent = `Chrome has paused access to ${handle.name}. Click “Back up now” once to restore it.`;
     return;
   }
   if (meta.error) {
     node.classList.add('warn');
-    node.textContent = `Last backup failed: ${meta.error}. Use Export JSON to save a copy by hand.`;
+    node.textContent = `Last backup failed: ${meta.error}. Export JSON still works.`;
     return;
   }
   if (!meta.lastAt) {
-    node.textContent = 'No backup written yet — the first one runs on the next day change.';
+    node.textContent = `Ready — writing to ${handle.name} the next time the day rolls over.`;
     return;
   }
-  const when = new Date(meta.lastAt);
-  const files = (meta.files || []).join(' and ');
-  node.textContent = `Last backup ${when.toLocaleString()} → Downloads/${files}`;
+  node.textContent = `Last backup ${new Date(meta.lastAt).toLocaleString()} → `
+    + `${meta.folder || handle.name}/${(meta.files || []).join(' and ')}`;
 }
 
-$('backup-now').addEventListener('click', async () => {
-  $('backup-status').textContent = 'Backing up…';
-  snapshot = await chrome.runtime.sendMessage({ type: 'backupNow' }).catch(() => null);
-  drawBackupStatus();
+$('backup-folder').addEventListener('click', async () => {
+  try {
+    await chooseFolder();
+    await backupIfDue(dayKey(Date.now(), settings.dayStartHour), { force: true });
+  } catch {
+    // The picker was dismissed; nothing to report.
+  }
+  await drawBackupStatus();
 });
+
+$('backup-now').addEventListener('click', async () => {
+  const handle = await storedFolder();
+  if (handle && (await folderState(handle)) !== 'granted') await reconnect(handle);
+  $('backup-status').textContent = 'Backing up…';
+  await backupIfDue(dayKey(Date.now(), settings.dayStartHour), { force: true });
+  await drawBackupStatus();
+});
+
+/** On open, write the day's backup if one is due. No prompt, no download. */
+async function backupOnOpen() {
+  if (!settings.backupEnabled || !fsSupported()) return;
+  await backupIfDue(dayKey(Date.now(), settings.dayStartHour));
+  await drawBackupStatus();
+}
 
 // ----------------------------------------------------------------- chrome
 

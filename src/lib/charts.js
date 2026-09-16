@@ -22,6 +22,7 @@ export function tokens() {
     entBg: get('--c-ent-bg'),
     menuBg: get('--c-menu-bg'),
     over: get('--c-ent-over'),
+    overHot: get('--c-ent-over-hot'),
     surface: get('--surface-1'),
     line: get('--line'),
     lineStrong: get('--line-strong'),
@@ -36,9 +37,15 @@ export function colorFor(c, bg, t = tokens()) {
   return bg ? t.menuBg : t.menu;
 }
 
-/** One 45° stripe pattern, overlaid on any fill to mark background playback. */
-function addStripes(svg) {
+/**
+ * Shared paint: the 45° stripes that mark background playback, and — for time
+ * spent past the daily limit — a gradient that runs hot towards the top plus a
+ * glow around the mark. Over-limit time is the one thing in this chart that is
+ * supposed to grab you, so it is the one thing allowed to be loud.
+ */
+function addDefs(svg, t) {
   const defs = svgEl('defs');
+
   const pattern = svgEl('pattern', {
     id: 'tl-stripes', width: 6, height: 6,
     patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)',
@@ -47,6 +54,26 @@ function addStripes(svg) {
     x1: 0, y1: 0, x2: 0, y2: 6, stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.5,
   }));
   defs.appendChild(pattern);
+
+  if (t) {
+    const grad = svgEl('linearGradient', { id: 'tl-over', x1: 0, y1: 1, x2: 0, y2: 0 });
+    grad.appendChild(svgEl('stop', { offset: 0, 'stop-color': t.over }));
+    grad.appendChild(svgEl('stop', { offset: 1, 'stop-color': t.overHot }));
+    defs.appendChild(grad);
+
+    const glow = svgEl('filter', {
+      id: 'tl-glow', x: '-120%', y: '-120%', width: '340%', height: '340%',
+      'color-interpolation-filters': 'sRGB',
+    });
+    glow.appendChild(svgEl('feDropShadow', {
+      dx: 0, dy: 0, stdDeviation: 2.5, 'flood-color': t.overHot, 'flood-opacity': 0.85,
+    }));
+    glow.appendChild(svgEl('feDropShadow', {
+      dx: 0, dy: 0, stdDeviation: 6, 'flood-color': t.over, 'flood-opacity': 0.6,
+    }));
+    defs.appendChild(glow);
+  }
+
   svg.appendChild(defs);
 }
 
@@ -115,7 +142,7 @@ export function renderTimeline(host, opts) {
   host.replaceChildren();
   const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}`, role: 'img' });
   svg.setAttribute('aria-label', 'Timeline of today, 4am to 4am');
-  addStripes(svg);
+  addDefs(svg);
 
   const x = (ms) => ((ms - start) / span) * width;
 
@@ -232,7 +259,7 @@ export function renderDailyBars(host, opts) {
   host.replaceChildren();
   const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}`, role: 'img' });
   svg.setAttribute('aria-label', mode === 'ent' ? 'Entertainment time per day' : 'Time per day by category');
-  addStripes(svg);
+  addDefs(svg, t);
 
   // Gridlines: hairline, solid, recessive.
   for (let v = 0; v <= top + 1; v += stepMs) {
@@ -264,11 +291,21 @@ export function renderDailyBars(host, opts) {
       const yBottom = y(part.from);
       // 2px surface gap between stacked segments, drawn by shortening the mark.
       const h = Math.max(1, yBottom - yTop - (idx > 0 ? 2 : 0));
-      const fill = t[part.c];
+      const over = part.c === 'over';
+      const fill = over ? 'url(#tl-over)' : t[part.c];
       const node = isTop
         ? svgEl('path', { d: roundedTopPath(x0, yTop, barW, h, 4), fill })
         : svgEl('rect', { x: x0, y: yTop, width: barW, height: h, fill });
-      svg.appendChild(node);
+      if (over) {
+        node.setAttribute('filter', 'url(#tl-glow)');
+        svg.appendChild(node);
+        // A hot cap line: the eye lands on where the day ended up, not just the colour.
+        svg.appendChild(svgEl('rect', {
+          x: x0, y: yTop, width: barW, height: Math.min(2, h), fill: t.overHot,
+        }));
+      } else {
+        svg.appendChild(node);
+      }
     });
 
     if (worst && worst.key === d.key) {

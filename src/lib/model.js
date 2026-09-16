@@ -192,6 +192,16 @@ export function stackParts(dayTotals, order, limitMs) {
   return parts;
 }
 
+/** The two files a backup writes: one always-current, one per month. */
+export function backupFilenames(key) {
+  return ['tubeledger-latest.json', `tubeledger-${key.slice(0, 7)}.json`];
+}
+
+/** A backup is due once per logical day — not once per launch, not once per tick. */
+export function needsBackup(meta, todayKey) {
+  return !meta || meta.lastDay !== todayKey;
+}
+
 /**
  * Which reminder step a remaining-budget sits in, counting down. Rounded up, so
  * the step changes exactly as the budget crosses a round figure: with a 5m

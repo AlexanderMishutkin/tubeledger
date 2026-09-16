@@ -15,7 +15,8 @@ body { background: var(--surface-0); }
 .stat .s { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .stat .meter { margin-top: 8px; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .stat .meter > span { display: block; height: 100%; background: var(--c-ent); }
-.stat.over .v { color: var(--c-ent); }
+.stat.over .v { color: var(--c-ent-over); text-shadow: 0 0 14px var(--c-ent-over); }
+.stat.over .meter > span { background: var(--c-ent-over); box-shadow: 0 0 10px var(--c-ent-over); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .card-head h2 { font-size: 14px; }

@@ -8,14 +8,13 @@ import {
   DEFAULT_SETTINGS, dayKey, splitByDay, totals, emptyTotals, fmtDuration, remindBucket,
 } from './lib/model.js';
 import {
-  getSettings, getDay, upsertSegment, newId, exportAll, getBackupMeta, setBackupMeta,
+  getSettings, getDay, upsertSegment, newId,
 } from './lib/store.js';
 import { decide } from './lib/decide.js';
 
 const HEARTBEAT_MS = 5000;   // content scripts ping at this rate
 const MAX_GAP_MS = 20000;    // a bigger jump means sleep/suspend: don't bill it
 const FLUSH_MS = 15000;      // worst-case data loss if the browser dies
-const BACKUP_DIR = 'TubeLedger';
 
 /** @type {Map<number, {playing:boolean, videoPage:boolean, visible:boolean, focused:boolean, category:string}>} */
 const tabs = new Map();
@@ -32,7 +31,6 @@ let storedToday = emptyTotals();
 let blocked = false;
 let ticking = false;
 let lastRemindBucket = null;
-let backupMeta = {};
 
 // ---------------------------------------------------------------- lifecycle
 
@@ -42,10 +40,8 @@ async function init() {
   idleState = await new Promise((r) => chrome.idle.queryState(Math.max(15, settings.idleSeconds), r));
   todayKey = dayKey(Date.now(), settings.dayStartHour);
   storedToday = totals(await getDay(todayKey));
-  backupMeta = await getBackupMeta();
   anchor = Date.now();
   await refreshBadge();
-  maybeBackup();
 }
 
 chrome.runtime.onInstalled.addListener(() => { init(); });
@@ -131,14 +127,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.idle.setDetectionInterval(Math.max(15, settings.idleSeconds));
         lastRemindBucket = null;
         await closeOpen();
-        maybeBackup();
         todayKey = dayKey(Date.now(), settings.dayStartHour);
         storedToday = totals(await getDay(todayKey));
         await refreshBadge();
         broadcastLimit();
-        return sendResponse(await snapshot());
-      case 'backupNow':
-        await runBackup('by hand');
         return sendResponse(await snapshot());
       case 'openDashboard':
         await chrome.tabs.create({ url: chrome.runtime.getURL('src/dashboard.html') });
@@ -207,7 +199,6 @@ async function tick(now = Date.now(), { boundary = false } = {}) {
       await flush(true);
       todayKey = dayKey(now, settings.dayStartHour);
       storedToday = totals(await getDay(todayKey));
-      maybeBackup(); // a day just closed: put a copy of it on disk
     } else if (open && now - lastFlush >= FLUSH_MS) {
       await flush();
     }
@@ -350,69 +341,7 @@ async function snapshot() {
     limitMs: limitMs(),
     blocked: settings.blockEnabled && entMsNow() >= limitMs(),
     tabCategories: Object.fromEntries([...tabs].map(([id, t]) => [id, t.category])),
-    backup: backupMeta,
   };
-}
-
-// -------------------------------------------------------------- backups
-//
-// chrome.storage.local survives restarts but not a wiped profile or a removed
-// extension, so the ledger also goes to a file: a full export, once a logical
-// day, into Downloads/TubeLedger. Two files — one always-current, one per month —
-// so a bad day's data cannot quietly overwrite the only copy you have.
-//
-// A worker cannot make a blob URL, so the JSON travels as a data: URL. Whether
-// that lands is not assumed: the download is looked up afterwards and what
-// Chrome reports is what the dashboard shows.
-
-function toBase64(str) {
-  const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
-function maybeBackup() {
-  if (!settings.backupEnabled || backupMeta.lastDay === todayKey) return;
-  runBackup('automatic');
-}
-
-async function runBackup(reason) {
-  const stamp = todayKey;
-  try {
-    const payload = await exportAll();
-    const days = Object.keys(payload.data || {}).filter((k) => k.startsWith('d:'));
-    if (!days.length) return; // nothing tracked yet: no point writing an empty file
-    const url = `data:application/json;base64,${toBase64(JSON.stringify(payload))}`;
-    const files = [`${BACKUP_DIR}/tubeledger-latest.json`, `${BACKUP_DIR}/tubeledger-${stamp.slice(0, 7)}.json`];
-    const ids = [];
-    for (const filename of files) {
-      ids.push(await chrome.downloads.download({ url, filename, conflictAction: 'overwrite', saveAs: false }));
-    }
-    const failure = await checkDownloads(ids);
-    backupMeta = failure
-      ? { ...backupMeta, error: failure, lastAttemptAt: Date.now() }
-      : { lastDay: stamp, lastAt: Date.now(), reason, files, days: days.length, error: null };
-  } catch (e) {
-    backupMeta = { ...backupMeta, error: String((e && e.message) || e), lastAttemptAt: Date.now() };
-  }
-  await setBackupMeta(backupMeta);
-}
-
-/** Returns a message if any of the downloads did not finish, or null if all did. */
-async function checkDownloads(ids) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    let pending = false;
-    for (const id of ids) {
-      const [item] = await chrome.downloads.search({ id });
-      if (!item) return 'Chrome lost track of the download';
-      if (item.state === 'interrupted') return item.error || 'interrupted';
-      if (item.state !== 'complete') pending = true;
-    }
-    if (!pending) return null;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return 'still not finished after three seconds';
 }
 
 // Keep the worker honest if it is woken without any port traffic.

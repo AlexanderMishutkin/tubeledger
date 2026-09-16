@@ -48,3 +48,9 @@ h1 { font-size: 16px; }
 .tab-note { font-size: 11px; margin-top: 7px; }
 
 footer button { width: 100%; }
+
+.hint-line {
+  margin: 0; font-size: 11px; color: var(--c-ent-over); font-weight: 500;
+  background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; cursor: pointer;
+}
