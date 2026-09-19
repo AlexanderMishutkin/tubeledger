@@ -103,6 +103,38 @@ flips the current tab between work and entertainment in one click, and so does
 the button on the corner bar. A tab left uncategorised books its time as yellow,
 not as entertainment.
 
+### What is remembered
+
+A tab dies with the browser, but the judgement behind the mark does not: a
+lecture you called educational on Friday is still a lecture on Monday. So the
+mark is kept **against the video**, not against the tab, and a tab that lands on
+a video you have already judged starts out judged — after a restart too. The
+indicator says so when that happens (*Educational · remembered*), because time
+quietly kept off the limit by a decision made weeks ago should not be quiet
+about where it came from.
+
+The order a tab settles its category in:
+
+| | |
+|---|---|
+| 1 | what you said about this tab while it was on this very video |
+| 2 | what you once said about **this video**, in any tab, on any day |
+| 3 | what you said about this tab on some other video — a tab stays as you set it |
+| 4 | `New tabs count as` |
+
+A mark that arrived by itself (2) is never inherited by the next video: autoplay
+moving on lands back at the default. Marking a video again replaces what is
+remembered, and *Uncategorised* takes the judgement back and forgets it.
+
+What is stored is a **one-way fingerprint** of the video id — a truncated
+SHA-256, never the id. That is enough to recognise a video you are on and not
+enough to say which videos those were: the store cannot be read back into a
+watch history. It is bounded twice over, at 500 marks and 90 days since a video
+was last seen, and the dashboard counts them and forgets them all on request.
+`Remember a video's category` in Settings switches the whole thing off. Marks
+travel with an export and a backup like everything else in `storage.local` —
+still as fingerprints.
+
 ## Backups
 
 `chrome.storage.local` survives browser restarts, but not a wiped profile or a
@@ -169,7 +201,9 @@ puzzling.
 
 There is no `tabs` permission: the extension never reads a tab's URL or title. It
 learns only what each content script reports about its own page — playing or not,
-a video page or not, visible or not, focused or not.
+a video page or not, visible or not, focused or not, and the id of the video on
+screen, which is hashed on arrival and kept only as a fingerprint (see *What is
+remembered*). No playlist, no search terms, no titles, no channels.
 
 No `fetch`, no `eval`, no `innerHTML`, no remote code, no `storage.sync`. Nothing
 leaves the browser. `test/preview*.html` are dev harnesses that do use `fetch` to
@@ -188,6 +222,7 @@ src/
     decide.js       the one rule that picks what the clock runs on
     model.js        days, segments, totals — pure, no chrome.*
     store.js        chrome.storage.local wrapper
+    marks.js        remembered categories, by fingerprint — pure, no chrome.*
     charts.js       hand-rolled SVG charts
     theme.css       palette and shared styles
 scripts/make-icons.mjs   generates icons/*.png from code
@@ -198,7 +233,7 @@ docs/                    screenshots
 ## Development
 
 ```sh
-npm test                 # 73 tests: the model, the economy, the decision rule,
+npm test                 # 86 tests: the model, the economy, the decision rule,
                          #           and the engine driven end-to-end
 npm run icons            # regenerate icons/*.png
 npm run preview          # then open http://localhost:8777/test/preview.html
@@ -210,7 +245,10 @@ and a fake clock, so the counting rules are checked without a browser.
 seeded data, and `test/preview-hud.html?mode=work|ent-toast|menu|blocked` renders
 the indicator over a mock YouTube carrying YouTube's real masthead ids — add
 `&fs=1` for fullscreen (it stubs `document.fullscreenElement`, which is what the
-script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`.
+script reads), `&theme=light`, `&stale=1`, `&nomasthead=1`, or `&from=memory` for the pill of a
+mark the worker recalled by itself. `test/preview.html?marks=<n>` and
+`test/preview-popup.html?cat=work&from=memory` show the same thing in the
+dashboard and the popup.
 `test/preview-recs.html?mode=soft|hard&left=<minutes>` builds a watch page (or
 `&page=home`) carrying **both** of YouTube's card layouts and runs the real
 content script against it — that is where the thinning rules are verified, since
@@ -276,7 +314,9 @@ labelled in the legend, the tooltips and the entries table.
 
 - Chrome/Chromium, Manifest V3. Not tested on Firefox.
 - Tab categories live in session storage: they survive a service-worker restart,
-  but reset when Chrome fully closes.
+  but reset when Chrome fully closes. What survives that is the mark on the
+  *video* — a tab reopened on the home feed, or on a video never marked, starts
+  at the default again.
 - The indicator's clock ticks in whole minutes and updates every few seconds, so
   a reminder can land a few seconds after the exact figure.
 - Docking into the header means reading YouTube's markup (`ytd-masthead #buttons`)

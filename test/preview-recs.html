@@ -150,7 +150,9 @@
         const marked = card.querySelector('[data-tl-hide]') || (card.hasAttribute('data-tl-hide') ? card : null);
         const title = card.querySelector('h3 a, .meta') || card.querySelector('a[href*="/watch"]');
         const vis = title ? getComputedStyle(title).visibility : '?';
-        const dur = (card.textContent.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/) || ['—'])[0];
+        // No \b: in the scrubbed fixture the filler title runs straight into the
+        // badge, and a letter next to a digit is not a word boundary.
+        const dur = (card.textContent.match(/\d{1,2}:\d{2}(?::\d{2})?/) || ['—'])[0];
         const now = card.getBoundingClientRect().height;
         return [
           String(i).padStart(2),

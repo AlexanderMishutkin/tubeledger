@@ -115,6 +115,8 @@
               totals: { work: 0, ent: 0, menu: 0, total: 0, fg: 0, bg: 0, byKind: {} },
               blocked: false,
               tabCategories: {},
+              tabCategoryFrom: {},
+              markCount: Number(new URLSearchParams(location.search).get('marks') || 0),
             };
           }
           return true;

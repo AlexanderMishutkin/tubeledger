@@ -27,13 +27,16 @@
         work: m(78), ent: m(43), menu: m(21), total: m(142), fg: m(119), bg: m(23),
         byKind: { work_fg: m(64), work_bg: m(14), ent_fg: m(34), ent_bg: m(9), menu_fg: m(21), menu_bg: 0 },
       },
-      tabCategories: { 1: 'ent' },
+      tabCategories: { 1: new URLSearchParams(location.search).get('cat') || 'ent' },
+      // ?from=memory shows the note for a mark the worker brought back by itself.
+      tabCategoryFrom: { 1: new URLSearchParams(location.search).get('from') || 'you' },
     };
     window.chrome = {
       runtime: {
         async sendMessage(msg) {
           if (msg.type === 'setCategory') {
             snapshot.tabCategories[1] = msg.category;
+            snapshot.tabCategoryFrom[1] = 'you';
             return snapshot;
           }
           return snapshot;

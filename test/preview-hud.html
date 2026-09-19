@@ -117,6 +117,8 @@
       type: 'limit',
       blocked: mode === 'blocked',
       category: mode === 'work' ? 'work' : 'ent',
+      // ?from=memory shows the pill for a mark the worker recalled by itself.
+      categoryFrom: params.get('from') || 'you',
       usedMs: mode === 'blocked' ? m(60) : m(15),
       limitMs: m(60),
       blockEnabled: true,

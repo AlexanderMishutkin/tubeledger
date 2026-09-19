@@ -115,10 +115,15 @@ function renderCategory() {
     btn.disabled = activeTabId == null || cat === undefined;
   }
   const note = $('tab-note');
+  const from = snapshot.tabCategoryFrom ? snapshot.tabCategoryFrom[activeTabId] : null;
   if (activeTabId == null || cat === undefined) {
     note.textContent = 'Open a YouTube tab to set its category.';
   } else if (cat === 'unset') {
     note.textContent = 'Uncategorised — this time books as menu (yellow) until you pick.';
+  } else if (from === 'memory') {
+    // The one case where the answer was not the default and not this session's
+    // doing: say so, or the popup looks like it decided on its own.
+    note.textContent = `Remembered: you marked this video ${known && cat === 'work' ? 'work & education' : 'entertainment'} before. Marking it again changes what is remembered.`;
   } else {
     note.textContent = 'New tabs start as '
       + (snapshot.settings.defaultCategory === 'work' ? 'work & education'

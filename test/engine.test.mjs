@@ -340,4 +340,118 @@ test('the pressure on YouTube rises as the budget runs out', async () => {
   await tab.close();
 });
 
+// ------------------------------------------- marks that outlive the tab
+
+const WATCH = (videoId) => ({ ...WATCHING, videoId });
+
+/** What a browser restart does: session storage goes, storage.local stays. */
+function restartBrowser() {
+  for (const k of Object.keys(session)) delete session[k];
+}
+
+test('a video marked educational is still educational in a new tab tomorrow', async () => {
+  store.settings = { carryEnabled: false, entLimitMin: 60 };
+  await ask({ type: 'settingsChanged' });
+  await ask({ type: 'forgetMarks' });
+  now = new Date(2026, 10, 3, 9, 0, 0, 0).getTime();
+
+  const tab = openTab(20);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCH('lecture-1'));
+  await ask({ type: 'setCategory', tabId: 20, category: 'work' });
+  await hold(tab, 60, WATCH('lecture-1'));
+  await tab.close();
+
+  restartBrowser();
+
+  const again = openTab(21);
+  await again.say({ type: 'hello' });
+  await switchTo(again, WATCH('lecture-1'));
+  await hold(again, 120, WATCH('lecture-1'));
+
+  assert.equal(again.inbox.at(-1).category, 'work', 'marked without being asked again');
+  assert.equal(again.inbox.at(-1).categoryFrom, 'memory', 'and the tab is told why');
+  await again.close();
+
+  const t = totals(store['d:2026-11-03'] || []);
+  assert.equal(t.ent, 0, 'none of it booked as entertainment');
+  assert.equal(t.work, 180000, 'both tabs knew what they were watching');
+});
+
+test('the mark belongs to the video, not to whatever the tab plays next', async () => {
+  now = new Date(2026, 10, 4, 9, 0, 0, 0).getTime();
+  const tab = openTab(22);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCH('lecture-1'));      // remembered
+  await hold(tab, 60, WATCH('lecture-1'));
+  await switchTo(tab, WATCH('never-judged'));   // autoplay moves on
+  await hold(tab, 60, WATCH('never-judged'));
+  await tab.close();
+
+  const t = totals(store['d:2026-11-04'] || []);
+  assert.equal(t.work, 60000, 'the minute on the lecture');
+  assert.equal(t.ent, 60000, 'the next video falls back to the default, not to the mark');
+});
+
+test('changing your mind replaces what is remembered', async () => {
+  now = new Date(2026, 10, 5, 9, 0, 0, 0).getTime();
+  const tab = openTab(23);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCH('lecture-1'));
+  await ask({ type: 'setCategory', tabId: 23, category: 'ent' });
+  await tab.close();
+
+  restartBrowser();
+  const again = openTab(24);
+  await again.say({ type: 'hello' });
+  await switchTo(again, WATCH('lecture-1'));
+  await hold(again, 60, WATCH('lecture-1'));
+  await again.close();
+
+  assert.equal(totals(store['d:2026-11-05'] || []).work, 0, 'it is not educational any more');
+  assert.equal(totals(store['d:2026-11-05'] || []).ent, 60000);
+});
+
+test('forgetting the marks puts the tabs that were riding one back to the default', async () => {
+  await ask({ type: 'forgetMarks' }); // start from an empty memory, so the count is the test's own
+  now = new Date(2026, 10, 6, 9, 0, 0, 0).getTime();
+  const tab = openTab(25);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCH('lecture-2'));
+  await ask({ type: 'setCategory', tabId: 25, category: 'work' });
+  await tab.close();
+
+  restartBrowser();
+  const again = openTab(26);
+  await again.say({ type: 'hello' });
+  await switchTo(again, WATCH('lecture-2'));
+  assert.equal(again.inbox.at(-1).category, 'work');
+  assert.equal((await ask({ type: 'getSnapshot' })).markCount, 1, 'one video remembered');
+
+  await ask({ type: 'forgetMarks' });
+  assert.equal(again.inbox.at(-1).category, 'ent', 'the tab is told at once, not at the next video');
+  assert.equal((await ask({ type: 'getSnapshot' })).markCount, 0);
+  await again.close();
+});
+
+test('remembering can be switched off, and then nothing is written down', async () => {
+  store.settings = { carryEnabled: false, entLimitMin: 60, rememberMarks: false };
+  await ask({ type: 'settingsChanged' });
+  now = new Date(2026, 10, 7, 9, 0, 0, 0).getTime();
+
+  const tab = openTab(27);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCH('lecture-3'));
+  await ask({ type: 'setCategory', tabId: 27, category: 'work' });
+  await tab.close();
+
+  restartBrowser();
+  const again = openTab(28);
+  await again.say({ type: 'hello' });
+  await switchTo(again, WATCH('lecture-3'));
+  assert.equal(again.inbox.at(-1).category, 'ent', 'nothing was remembered to bring back');
+  assert.equal((await ask({ type: 'getSnapshot' })).markCount, 0);
+  await again.close();
+});
+
 test.after(() => { Date.now = realNow; });

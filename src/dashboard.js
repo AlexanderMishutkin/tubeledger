@@ -55,6 +55,7 @@ async function reload() {
 function render() {
   $('day-title').textContent = prettyDate(viewKey);
   drawBackupStatus();
+  drawMarksLine();
   $('next-day').disabled = viewKey >= dayKey(Date.now(), settings.dayStartHour);
   drawStats();
   drawLegend();
@@ -487,6 +488,7 @@ function fillSettings() {
   $('set-bg').checked = !!settings.countBackground;
   $('set-hud').checked = !!settings.hudEnabled;
   $('set-backup').checked = !!settings.backupEnabled;
+  $('set-remember').checked = !!settings.rememberMarks;
   $('set-carry').checked = !!settings.carryEnabled;
   $('set-remind').value = String(settings.remindEveryMin);
   $('set-block').checked = !!settings.blockEnabled;
@@ -501,6 +503,7 @@ async function onSettingChange() {
     countBackground: $('set-bg').checked,
     hudEnabled: $('set-hud').checked,
     backupEnabled: $('set-backup').checked,
+    rememberMarks: $('set-remember').checked,
     carryEnabled: $('set-carry').checked,
     remindEveryMin: clamp(Number($('set-remind').value) || 0, 0, 60),
     blockEnabled: $('set-block').checked,
@@ -515,7 +518,7 @@ async function onSettingChange() {
 }
 
 for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block',
-  'set-hud', 'set-remind', 'set-backup', 'set-carry']) {
+  'set-hud', 'set-remind', 'set-backup', 'set-carry', 'set-remember']) {
   $(id).addEventListener('change', onSettingChange);
 }
 
@@ -546,6 +549,27 @@ $('import-file').addEventListener('change', async (e) => {
     $('save-note').textContent = `Import failed: ${err.message}`;
   }
   e.target.value = '';
+});
+
+/**
+ * The remembered marks, counted but not listed — there is nothing to list. What
+ * is stored is a one-way hash of each video id, which is enough to recognise a
+ * video you are already on and not enough to say which videos those were.
+ */
+function drawMarksLine() {
+  const count = snapshot && typeof snapshot.markCount === 'number' ? snapshot.markCount : 0;
+  $('marks-line').textContent = count === 0
+    ? 'No videos remembered yet. Marking a video work or entertainment remembers it, so it comes back the same way — after a restart too.'
+    : `${count} video${count === 1 ? '' : 's'} remembered by fingerprint, so a tab that lands on one starts out marked. `
+      + 'Unused marks fade after 90 days.';
+  $('forget-marks').disabled = count === 0;
+}
+
+$('forget-marks').addEventListener('click', async () => {
+  const count = snapshot && snapshot.markCount ? snapshot.markCount : 0;
+  if (!window.confirm(`Forget ${count} remembered video mark(s)? Tracked time is not affected.`)) return;
+  await chrome.runtime.sendMessage({ type: 'forgetMarks' }).catch(() => {});
+  await reload();
 });
 
 $('wipe').addEventListener('click', async () => {

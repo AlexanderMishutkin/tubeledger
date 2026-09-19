@@ -10,14 +10,18 @@ import {
 } from './lib/model.js';
 import {
   getSettings, getDay, upsertSegment, newId, refreshCarry, carryOn,
+  getMarks, saveMarks, clearMarks,
 } from './lib/store.js';
+import {
+  fingerprint, lookupMark, putMark, touchMark, forgetMark, pruneMarks, countMarks,
+} from './lib/marks.js';
 import { decide } from './lib/decide.js';
 
 const HEARTBEAT_MS = 5000;   // content scripts ping at this rate
 const MAX_GAP_MS = 20000;    // a bigger jump means sleep/suspend: don't bill it
 const FLUSH_MS = 15000;      // worst-case data loss if the browser dies
 
-/** @type {Map<number, {playing:boolean, videoPage:boolean, visible:boolean, focused:boolean, category:string}>} */
+/** @type {Map<number, {playing:boolean, videoPage:boolean, visible:boolean, focused:boolean, category:string, from:string, video:string|null, fp:string|null}>} */
 const tabs = new Map();
 /** @type {Map<chrome.runtime.Port, number|null>} port -> tab it belongs to (null for pages) */
 const ports = new Map();
@@ -33,11 +37,17 @@ let blocked = false;
 let ticking = false;
 let lastRemindBucket = null;
 let carryToday = NO_CARRY;   // what yesterday left behind: debt owed, or time banked
+let marks = {};              // fingerprint -> the category you gave that video
 
 // ---------------------------------------------------------------- lifecycle
 
 async function init() {
   settings = await getSettings();
+  const stored = await getMarks();
+  marks = pruneMarks(stored);
+  // Only write back when the prune actually dropped something: the worker wakes
+  // far too often for a storage write to be the price of waking up.
+  if (Object.keys(marks).length !== Object.keys(stored).length) await saveMarks(marks);
   chrome.idle.setDetectionInterval(Math.max(15, settings.idleSeconds));
   idleState = await new Promise((r) => chrome.idle.queryState(Math.max(15, settings.idleSeconds), r));
   todayKey = dayKey(Date.now(), settings.dayStartHour);
@@ -74,20 +84,32 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'state' && tabId != null) {
       const prev = tabs.get(tabId);
+      const video = typeof msg.videoId === 'string' && msg.videoId ? msg.videoId : null;
+      // The category is only worked out again when the tab lands on a different
+      // video; the other twelve messages a minute must not cost a hash and a read.
+      const seen = prev && prev.video === video
+        ? { category: prev.category, from: prev.from, fp: prev.fp }
+        : await recall(tabId, video);
       tabs.set(tabId, {
         playing: !!msg.playing,
         videoPage: !!msg.videoPage,
         visible: !!msg.visible,
         focused: !!msg.focused,
-        category: (prev && prev.category) || await tabCategory(tabId),
+        video,
+        fp: seen.fp,
+        category: seen.category,
+        from: seen.from,
       });
-      await tick();
+      // A category that changed under the tab's feet is a segment boundary like
+      // any other: the time before it was a different kind of time.
+      await tick(Date.now(), { boundary: !!prev && prev.category !== seen.category });
       postLimit(port, tabId);
     } else if (msg.type === 'hello') {
       if (tabId != null && !tabs.has(tabId)) {
+        const seen = await recall(tabId, null);
         tabs.set(tabId, {
           playing: false, videoPage: false, visible: false, focused: false,
-          category: await tabCategory(tabId),
+          video: null, fp: seen.fp, category: seen.category, from: seen.from,
         });
       }
       postLimit(port, tabId);
@@ -118,15 +140,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'setCategory': {
         const tabId = msg.tabId != null ? msg.tabId : (sender.tab && sender.tab.id);
         if (tabId == null) return sendResponse(null);
-        await chrome.storage.session.set({ [`cat:${tabId}`]: msg.category });
         const t = tabs.get(tabId);
-        if (t) t.category = msg.category;
+        const fp = t ? t.fp : null;
+        await chrome.storage.session.set({ [`cat:${tabId}`]: { c: msg.category, fp } });
+        // Said about a video, and so remembered against it. `unset` is you taking
+        // the judgement back, which forgets it rather than recording an opinion.
+        if (fp && (settings.rememberMarks || msg.category === 'unset')) {
+          marks = await saveMarks(msg.category === 'unset'
+            ? forgetMark(marks, fp)
+            : putMark(marks, fp, msg.category));
+        }
+        if (t) { t.category = msg.category; t.from = 'you'; }
         await tick(Date.now(), { boundary: true });
         broadcastLimit();
         return sendResponse(await snapshot());
       }
-      case 'settingsChanged':
+      case 'settingsChanged': {
         settings = await getSettings();
+        if (!settings.rememberMarks) dropRecalled();
         chrome.idle.setDetectionInterval(Math.max(15, settings.idleSeconds));
         lastRemindBucket = null;
         await closeOpen();
@@ -136,6 +167,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await refreshBadge();
         broadcastLimit();
         return sendResponse(await snapshot());
+      }
+      case 'forgetMarks': {
+        marks = {};
+        await clearMarks();
+        dropRecalled();
+        await tick(Date.now(), { boundary: true });
+        broadcastLimit();
+        return sendResponse(await snapshot());
+      }
       case 'openDashboard':
         await chrome.tabs.create({ url: chrome.runtime.getURL('src/dashboard.html') });
         return sendResponse(true);
@@ -156,11 +196,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async sendResponse
 });
 
-async function tabCategory(tabId) {
+/**
+ * Tabs riding a remembered mark lose it now, not at the next video: remembering
+ * has just been switched off or the marks thrown away, and a tab still counting
+ * as educational because of a mark that no longer exists would be lying about why.
+ */
+function dropRecalled() {
+  for (const t of tabs.values()) {
+    if (t.from === 'memory') { t.category = settings.defaultCategory; t.from = 'default'; }
+  }
+}
+
+/** What you last said about this tab, and the video you said it about. */
+async function tabSaid(tabId) {
   const got = await chrome.storage.session.get(`cat:${tabId}`);
   const stored = got[`cat:${tabId}`];
-  if (stored === 'work' || stored === 'ent' || stored === 'unset') return stored;
-  return settings.defaultCategory;
+  if (stored && typeof stored === 'object' && stored.c) return stored;
+  // A plain string is what 0.6.x wrote: a tab marked before this build was
+  // installed keeps its mark instead of quietly falling back to the default.
+  if (typeof stored === 'string') return { c: stored, fp: null };
+  return null;
+}
+
+/**
+ * The category a tab should carry on this video, in order of how much it was meant:
+ *
+ *   1. what you said about this tab while it was on this very video
+ *   2. what you once said about this video, in any tab, on any day
+ *   3. what you said about this tab on some other video (a tab stays as you set it)
+ *   4. the default for new tabs
+ *
+ * `from` travels with it so the indicator can admit which of those happened —
+ * a tab that turns educational on its own has to say why.
+ */
+async function recall(tabId, video) {
+  const fp = video ? await fingerprint(video) : null;
+  const said = await tabSaid(tabId);
+  if (said && fp && said.fp === fp) return { category: said.c, from: 'you', fp };
+  const remembered = fp && settings.rememberMarks ? lookupMark(marks, fp) : null;
+  if (remembered) {
+    // Seeing it again is what keeps it: the prune measures last seen, not last said.
+    marks = await saveMarks(touchMark(marks, fp));
+    return { category: remembered, from: 'memory', fp };
+  }
+  if (said) return { category: said.c, from: 'you', fp };
+  return { category: settings.defaultCategory, from: 'default', fp };
 }
 
 // ------------------------------------------------------------- the decision
@@ -353,7 +433,11 @@ function broadcastRemind(remainingMs) {
 
 function postLimit(port, tabId) {
   const tab = tabId != null ? tabs.get(tabId) : null;
-  const msg = { ...limitMessage(), category: tab ? tab.category : null };
+  const msg = {
+    ...limitMessage(),
+    category: tab ? tab.category : null,
+    categoryFrom: tab ? tab.from : null,
+  };
   try { port.postMessage(msg); } catch { /* port closed */ }
 }
 
@@ -382,6 +466,8 @@ async function snapshot() {
     carry: carryToday,
     blocked: settings.blockEnabled && remainingMs() <= 0,
     tabCategories: Object.fromEntries([...tabs].map(([id, t]) => [id, t.category])),
+    tabCategoryFrom: Object.fromEntries([...tabs].map(([id, t]) => [id, t.from])),
+    markCount: countMarks(marks),
   };
 }
 

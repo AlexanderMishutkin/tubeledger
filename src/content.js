@@ -3,7 +3,10 @@
 //   2. show the corner indicator: mode, budget left, and the periodic reminder
 //   3. pause entertainment playback once the daily limit is spent
 //
-// It reads no video titles, no channel names, no URLs beyond the path shape.
+// It reads no video titles and no channel names. The one thing it takes from the
+// URL is the id of the video being watched, which it reports so the worker can
+// recognise a video you have already marked; the worker keeps a hash of it, never
+// the id itself.
 // Built with createElement/textContent only — no innerHTML, no eval.
 (() => {
   'use strict';
@@ -12,7 +15,7 @@
   // unpacked extension does NOT replace this script in tabs that are already
   // open, so a tab can go on running an old build against a new worker. When
   // the worker reports a different version, the pill says so.
-  const BUILD = '0.6.1';
+  const BUILD = '0.7.0';
 
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;
@@ -33,6 +36,7 @@
   let limitMs = 0;
   let hudEnabled = true;
   let workerBuild = '';
+  let categoryFrom = null;    // you | memory | default — where that category came from
   let restriction = 'none';   // none | soft | hard
   let remainingMs = 0;
   let sweepScheduled = false;
@@ -63,6 +67,21 @@
     return false;
   }
 
+  /**
+   * The id of the video on screen, and nothing else from the URL — no playlist,
+   * no search terms, no timestamp. It is what lets a video you have already
+   * called educational come back educational tomorrow.
+   */
+  function currentVideoId() {
+    const shorts = /^\/shorts\/([\w-]+)/.exec(location.pathname);
+    if (shorts) return shorts[1];
+    const live = /^\/live\/([\w-]+)/.exec(location.pathname);
+    if (live) return live[1];
+    if (!/^\/watch/.test(location.pathname)) return null;
+    const v = new URLSearchParams(location.search).get('v');
+    return v && /^[\w-]+$/.test(v) ? v : null;
+  }
+
   function collect() {
     return {
       type: 'state',
@@ -70,13 +89,14 @@
       videoPage: isVideoPage(),
       visible: document.visibilityState === 'visible',
       focused: document.hasFocus(),
+      videoId: currentVideoId(),
     };
   }
 
   function send(force) {
     if (!port) return;
     const state = collect();
-    const signature = `${state.playing}|${state.videoPage}|${state.visible}|${state.focused}`;
+    const signature = `${state.playing}|${state.videoPage}|${state.visible}|${state.focused}|${state.videoId}`;
     const now = Date.now();
     if (!force && signature === lastSignature && now - lastSent < HEARTBEAT_MS) return;
     lastSignature = signature;
@@ -104,6 +124,7 @@
       if (msg.type === 'limit') {
         blocked = !!msg.blocked;
         category = msg.category;
+        categoryFrom = msg.categoryFrom || null;
         usedMs = msg.usedMs || 0;
         limitMs = msg.limitMs || 0;
         hudEnabled = msg.hudEnabled !== false;
@@ -407,7 +428,7 @@
     // A stale tab always shows, even mid-video: one refresh is all it needs.
     const stale = isStale();
     const wanted = stale || !(playing && mode !== 'work'); // watching entertainment: say nothing
-    const signature = `${stale}|${playing}|${mode}|${Math.round(remaining / 60000)}|${limitMs}|${!!slot}|${isDark()}`;
+    const signature = `${stale}|${playing}|${mode}|${categoryFrom}|${Math.round(remaining / 60000)}|${limitMs}|${!!slot}|${isDark()}`;
 
     // Polymer re-renders the masthead often enough that a detached pill is
     // normal, not an error: rebuild whenever ours is no longer in the document.
@@ -461,8 +482,15 @@
     if (playing && mode === 'work') {
       const check = el('span', 'tl-check', '\u2713');
       check.setAttribute('aria-hidden', 'true');
-      pill.append(check, el('span', null, 'Educational'), el('span', 'tl-quiet', '· off the clock'));
-      pill.title = 'Work & education time is tracked but never counts against the entertainment limit.';
+      // A mark that arrived by itself says so. Time quietly kept off the limit by
+      // a decision you made weeks ago is exactly the kind of thing that should
+      // not be quiet about where it came from.
+      const remembered = categoryFrom === 'memory';
+      pill.append(check, el('span', null, 'Educational'),
+        el('span', 'tl-quiet', remembered ? '\u00b7 remembered' : '\u00b7 off the clock'));
+      pill.title = remembered
+        ? 'You marked this video educational before, so it is off the clock again. Mark it entertainment to change that.'
+        : 'Work & education time is tracked but never counts against the entertainment limit.';
       pill.classList.add('tl-dock-plain');
       return pill;
     }
@@ -483,7 +511,8 @@
       setCategory(other);
     });
     pill.appendChild(swap);
-    pill.title = `This tab is ${label.toLowerCase()}. ${mode === 'work' ? 'It does not touch the limit.' : `${fmt(remaining)} of today's entertainment budget is left.`}`;
+    const why = categoryFrom === 'memory' ? ' Remembered from the last time you marked this video.' : '';
+    pill.title = `This tab is ${label.toLowerCase()}.${why} ${mode === 'work' ? 'It does not touch the limit.' : `${fmt(remaining)} of today's entertainment budget is left.`}`;
     return pill;
   }
 

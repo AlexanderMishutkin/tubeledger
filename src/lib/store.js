@@ -115,6 +115,23 @@ export function carryOn(chain, key) {
   return (chain && chain[key]) || NO_CARRY;
 }
 
+const MARKS_KEY = 'marks';
+
+/** Fingerprint -> { c, t }: the categories you have already decided on. */
+export async function getMarks() {
+  const got = await chrome.storage.local.get(MARKS_KEY);
+  return got[MARKS_KEY] || {};
+}
+
+export async function saveMarks(marks) {
+  await chrome.storage.local.set({ [MARKS_KEY]: marks });
+  return marks;
+}
+
+export async function clearMarks() {
+  await chrome.storage.local.remove(MARKS_KEY);
+}
+
 const BACKUP_KEY = 'backup';
 
 export async function getBackupMeta() {

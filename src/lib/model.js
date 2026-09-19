@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
   backupEnabled: true,    // keep a copy of the ledger in a folder you choose
   carryEnabled: true,     // overtime becomes tomorrow's debt, thrift becomes bonus
   carryShare: 2 / 3,      // how much of what you did not spend is banked
+  rememberMarks: true,    // a video you marked comes back marked, browser restarts included
 };
 
 const DAY_MS = 86400000;
