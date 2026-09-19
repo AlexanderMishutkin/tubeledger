@@ -6,9 +6,10 @@
 // ledger can never add up to more than wall-clock time.
 import {
   DEFAULT_SETTINGS, dayKey, splitByDay, totals, emptyTotals, fmtDuration, remindBucket,
+  allowanceFor, chargedFor, restrictionFor, NO_CARRY,
 } from './lib/model.js';
 import {
-  getSettings, getDay, upsertSegment, newId,
+  getSettings, getDay, upsertSegment, newId, refreshCarry, carryOn,
 } from './lib/store.js';
 import { decide } from './lib/decide.js';
 
@@ -31,6 +32,7 @@ let storedToday = emptyTotals();
 let blocked = false;
 let ticking = false;
 let lastRemindBucket = null;
+let carryToday = NO_CARRY;   // what yesterday left behind: debt owed, or time banked
 
 // ---------------------------------------------------------------- lifecycle
 
@@ -40,6 +42,7 @@ async function init() {
   idleState = await new Promise((r) => chrome.idle.queryState(Math.max(15, settings.idleSeconds), r));
   todayKey = dayKey(Date.now(), settings.dayStartHour);
   storedToday = totals(await getDay(todayKey));
+  await refreshEconomy();
   anchor = Date.now();
   await refreshBadge();
 }
@@ -129,6 +132,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await closeOpen();
         todayKey = dayKey(Date.now(), settings.dayStartHour);
         storedToday = totals(await getDay(todayKey));
+        await refreshEconomy();
         await refreshBadge();
         broadcastLimit();
         return sendResponse(await snapshot());
@@ -141,6 +145,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         discardOpen();
         lastRemindBucket = null;
         storedToday = totals(await getDay(todayKey));
+        await refreshEconomy();
         await refreshBadge();
         broadcastLimit();
         return sendResponse(await snapshot());
@@ -199,6 +204,7 @@ async function tick(now = Date.now(), { boundary = false } = {}) {
       await flush(true);
       todayKey = dayKey(now, settings.dayStartHour);
       storedToday = totals(await getDay(todayKey));
+      await refreshEconomy(); // yesterday just closed: settle up before counting on
     } else if (open && now - lastFlush >= FLUSH_MS) {
       await flush();
     }
@@ -246,13 +252,37 @@ function entMsNow() {
 
 // -------------------------------------------------------------- the limit
 
+async function refreshEconomy() {
+  const chain = await refreshCarry(settings);
+  carryToday = settings.carryEnabled ? carryOn(chain, todayKey) : NO_CARRY;
+  // Today's ceiling just moved. That is not time being spent, so the reminder
+  // steps are re-seated rather than announced — otherwise a day rolling over,
+  // or an edit to last week, would nudge you about a video you are not watching.
+  lastRemindBucket = null;
+}
+
+/** The limit as configured — the number in Settings, the same every day. */
 function limitMs() {
   return Math.max(0, settings.entLimitMin) * 60000;
 }
 
+/** The limit as it applies today, once banked time is added. */
+function allowanceMs() {
+  return allowanceFor(carryToday, limitMs());
+}
+
+/** Entertainment charged to today: watched plus owed. */
+function chargedMs() {
+  return chargedFor(entMsNow(), carryToday);
+}
+
+function remainingMs() {
+  return allowanceMs() - chargedMs();
+}
+
 async function refreshBadge() {
-  const used = entMsNow();
-  const left = limitMs() - used;
+  const used = chargedMs();
+  const left = remainingMs();
   const nowBlocked = settings.blockEnabled && left <= 0;
   if (nowBlocked !== blocked) {
     blocked = nowBlocked;
@@ -264,18 +294,27 @@ async function refreshBadge() {
   try {
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
+    const ceiling = fmtDuration(allowanceMs());
     await chrome.action.setTitle({
-      title: `TubeLedger — ${fmtDuration(used)} of ${settings.entLimitMin}m entertainment used today`,
+      title: `TubeLedger — ${fmtDuration(used)} of ${ceiling} entertainment used today`
+        + (carryToday.debt ? ` (${fmtDuration(carryToday.debt)} carried over)` : '')
+        + (carryToday.bonus ? ` (${fmtDuration(carryToday.bonus)} banked)` : ''),
     });
   } catch { /* action API unavailable during teardown */ }
 }
 
 function limitMessage() {
+  const left = remainingMs();
   return {
     type: 'limit',
-    blocked: settings.blockEnabled && entMsNow() >= limitMs(),
-    usedMs: entMsNow(),
-    limitMs: limitMs(),
+    blocked: settings.blockEnabled && left <= 0,
+    usedMs: chargedMs(),
+    limitMs: allowanceMs(),
+    baseLimitMs: limitMs(),
+    remainingMs: left,
+    debtMs: carryToday.debt,
+    bonusMs: carryToday.bonus,
+    restriction: restrictionFor(left),
     blockEnabled: settings.blockEnabled,
     hudEnabled: settings.hudEnabled,
     build: chrome.runtime.getManifest().version,
@@ -293,7 +332,7 @@ function updateReminder() {
     lastRemindBucket = null;
     return;
   }
-  const remaining = Math.max(0, limitMs() - entMsNow());
+  const remaining = Math.max(0, remainingMs());
   const bucket = remindBucket(remaining, interval);
   if (lastRemindBucket === null || bucket > lastRemindBucket) {
     // First look, a new day, or time edited back in: take the step, say nothing.
@@ -338,8 +377,10 @@ async function snapshot() {
     current,
     idleState,
     settings,
-    limitMs: limitMs(),
-    blocked: settings.blockEnabled && entMsNow() >= limitMs(),
+    limitMs: allowanceMs(),
+    baseLimitMs: limitMs(),
+    carry: carryToday,
+    blocked: settings.blockEnabled && remainingMs() <= 0,
     tabCategories: Object.fromEntries([...tabs].map(([id, t]) => [id, t.category])),
   };
 }

@@ -12,7 +12,7 @@
   // unpacked extension does NOT replace this script in tabs that are already
   // open, so a tab can go on running an old build against a new worker. When
   // the worker reports a different version, the pill says so.
-  const BUILD = '0.5.0';
+  const BUILD = '0.6.0';
 
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;
@@ -33,6 +33,9 @@
   let limitMs = 0;
   let hudEnabled = true;
   let workerBuild = '';
+  let restriction = 'none';   // none | soft | hard
+  let remainingMs = 0;
+  let sweepScheduled = false;
 
   let hudSignature = '';
   let toastTimer = null;
@@ -105,8 +108,11 @@
         limitMs = msg.limitMs || 0;
         hudEnabled = msg.hudEnabled !== false;
         workerBuild = msg.build || '';
+        restriction = msg.restriction || 'none';
+        remainingMs = typeof msg.remainingMs === 'number' ? msg.remainingMs : 0;
         enforce();
         renderHud();
+        sweep();
       } else if (msg.type === 'remind') {
         // The worker crossed a reminder step; show it only where it is being watched.
         if (hudEnabled && !blocked && category === 'ent' && isPlaying() && inFront()) {
@@ -242,6 +248,27 @@
         #${HUD_ID} .tl-toast, #${HUD_ID} .tl-toast.tl-out { animation: none; }
       }
 
+      [${HIDE_ATTR}] { display: none !important; }
+      [data-tl-search="off"] {
+        opacity: .35 !important; pointer-events: none !important; filter: grayscale(1);
+      }
+      #${BANNER_ID} {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        margin: 0 0 16px; padding: 12px 14px; border-radius: 12px;
+        background: rgba(22, 22, 21, .92); color: #fcfcfb;
+        border: 1px solid rgba(255, 255, 255, .14); border-left: 3px solid #ec7268;
+        font: 500 13px/1.4 "Roboto", system-ui, -apple-system, sans-serif;
+      }
+      #${BANNER_ID} .tl-b-dot {
+        width: 8px; height: 8px; border-radius: 50%; background: #ec7268; flex: none;
+      }
+      #${BANNER_ID} .tl-b-text { flex: 1; min-width: 180px; }
+      #${BANNER_ID} button {
+        font: inherit; font-size: 12px; cursor: pointer; border: 0; border-radius: 999px;
+        padding: 6px 12px; background: #1a9b22; color: #fff;
+      }
+      #${BANNER_ID} button:hover { filter: brightness(1.1); }
+
       #${OVERLAY_ID} {
         position: fixed; inset: 0; z-index: 2147483647;
         display: flex; align-items: center; justify-content: center;
@@ -334,6 +361,7 @@
       category = next;
       renderHud();
       enforce();
+      sweep();
     });
   }
 
@@ -461,6 +489,213 @@
     }, TOAST_MS);
   }
 
+  // ------------------------------------------------- thinning the temptation
+  //
+  // As the budget runs down, YouTube stops offering what you cannot afford:
+  //   soft (under 20m left)  recommendations longer than what is left × 1.9
+  //   hard (under 5m left)   every recommendation, the home feed, and search
+  // Marking the tab educational lifts all of it at once, which is the only way
+  // out that does not involve spending the budget.
+  //
+  // Nothing here writes a style attribute onto YouTube's own nodes — Polymer
+  // wipes those on re-render. It sets a data attribute and lets our stylesheet
+  // do the hiding, which survives.
+
+  const SUGGESTION_FACTOR = 1.9;
+  const HIDE_ATTR = 'data-tl-hide';
+  const BANNER_ID = 'tubeledger-thinned';
+  const DURATION_RE = /^(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)$/;
+
+  function parseDuration(text) {
+    const m = DURATION_RE.exec((text || '').trim());
+    if (!m) return null;
+    return ((Number(m[1] || 0) * 3600) + (Number(m[2]) * 60) + Number(m[3])) * 1000;
+  }
+
+  /**
+   * The duration badge on a card. Class names change every few months, so the
+   * badge is found by the shape of its text, with class hints only as a tiebreak.
+   */
+  function durationOf(card) {
+    let hinted = null;
+    let plain = null;
+    for (const node of card.querySelectorAll('span, div, yt-formatted-string')) {
+      if (node.firstElementChild) continue; // leaves only: the badge is a text node
+      const ms = parseDuration(node.textContent);
+      if (ms === null) continue;
+      const hint = node.closest('[class*="badge"], [class*="time-status"], [class*="thumbnail"]');
+      if (hint && hinted === null) hinted = ms;
+      if (plain === null) plain = ms;
+    }
+    return hinted !== null ? hinted : plain;
+  }
+
+  /**
+   * The card a link belongs to: walk up while the ancestor still covers this one
+   * video, and stop before the one that covers several. Structure, not class
+   * names, so a YouTube redesign does not silently switch the feature off.
+   */
+  function cardFor(link, root) {
+    let node = link;
+    for (let i = 0; i < 8; i += 1) {
+      const parent = node.parentElement;
+      if (!parent || parent === root || parent === document.body) return node;
+      if (parent.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]').length > 1) return node;
+      node = parent;
+    }
+    return node;
+  }
+
+  function cardsIn(root) {
+    const seen = new Set();
+    for (const link of root.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]')) {
+      const card = cardFor(link, root);
+      if (card && card !== root) seen.add(card);
+    }
+    return [...seen];
+  }
+
+  function suggestionRoots() {
+    const roots = [];
+    const push = (node) => { if (node && !roots.includes(node)) roots.push(node); };
+    push(document.querySelector('ytd-watch-next-secondary-results-renderer'));
+    push(document.querySelector('#secondary #related'));
+    push(document.querySelector('#secondary'));
+    return roots;
+  }
+
+  function homeRoots() {
+    if (!/^\/(|feed\/(subscriptions|trending|explore))\/?$/.test(location.pathname)) return [];
+    const roots = [];
+    const push = (node) => { if (node && !roots.includes(node)) roots.push(node); };
+    push(document.querySelector('ytd-rich-grid-renderer'));
+    push(document.querySelector('ytd-browse[role="main"] #contents'));
+    push(document.querySelector('#primary #contents'));
+    return roots;
+  }
+
+  function mark(node, reason) {
+    if (node.getAttribute(HIDE_ATTR) !== reason) node.setAttribute(HIDE_ATTR, reason);
+  }
+
+  function unmarkAll() {
+    for (const node of document.querySelectorAll(`[${HIDE_ATTR}]`)) node.removeAttribute(HIDE_ATTR);
+    const banner = document.getElementById(BANNER_ID);
+    if (banner) banner.remove();
+    const search = searchBox();
+    if (search) search.removeAttribute('data-tl-search');
+  }
+
+  function searchBox() {
+    return document.querySelector('ytd-searchbox') || document.querySelector('#search-form')
+      || document.querySelector('#center');
+  }
+
+  /** The active restriction for this tab, which educational mode always clears. */
+  function activeRestriction() {
+    if (!hudEnabled) return 'none';
+    if (category !== 'ent') return 'none';
+    if (document.fullscreenElement) return 'none';
+    return restriction;
+  }
+
+  function sweep() {
+    const level = activeRestriction();
+    if (level === 'none') {
+      unmarkAll();
+      return;
+    }
+
+    const budget = Math.max(0, remainingMs) * SUGGESTION_FACTOR;
+    let thinned = 0;
+    for (const root of suggestionRoots()) {
+      for (const card of cardsIn(root)) {
+        if (level === 'hard') {
+          mark(card, 'all');
+          thinned += 1;
+          continue;
+        }
+        const ms = durationOf(card);
+        // Only hide what can be shown to be too long: an unreadable card stays.
+        if (ms !== null && ms > budget) {
+          mark(card, 'long');
+          thinned += 1;
+        } else if (card.hasAttribute(HIDE_ATTR)) {
+          card.removeAttribute(HIDE_ATTR);
+        }
+      }
+    }
+
+    if (level === 'hard') {
+      for (const root of homeRoots()) {
+        for (const card of cardsIn(root)) {
+          mark(card, 'all');
+          thinned += 1;
+        }
+      }
+      const search = searchBox();
+      if (search) search.setAttribute('data-tl-search', 'off');
+      showBanner();
+    } else {
+      const banner = document.getElementById(BANNER_ID);
+      if (banner) banner.remove();
+      const search = searchBox();
+      if (search) search.removeAttribute('data-tl-search');
+      if (thinned > 0) showBanner();
+    }
+  }
+
+  /** An empty page must never look broken: say who emptied it, and why. */
+  function showBanner() {
+    const host = suggestionRoots()[0] || homeRoots()[0];
+    if (!host) return;
+    let banner = document.getElementById(BANNER_ID);
+    const hard = activeRestriction() === 'hard';
+    const text = hard
+      ? `${fmt(Math.max(0, remainingMs))} of entertainment left — YouTube is holding off.`
+      : `${fmt(Math.max(0, remainingMs))} left — anything longer than ${fmt(Math.max(0, remainingMs) * SUGGESTION_FACTOR)} is hidden.`;
+    if (banner) {
+      const line = banner.querySelector('.tl-b-text');
+      if (line) line.textContent = text;
+      if (banner.parentNode !== host) host.insertBefore(banner, host.firstChild);
+      return;
+    }
+    ensureStyles();
+    banner = el('div');
+    banner.id = BANNER_ID;
+    banner.appendChild(el('span', 'tl-b-dot'));
+    banner.appendChild(el('span', 'tl-b-text', text));
+    const button = el('button', null, 'Mark educational');
+    button.type = 'button';
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCategory('work');
+    });
+    banner.appendChild(button);
+    host.insertBefore(banner, host.firstChild);
+  }
+
+  /** Enter in a disabled search box does nothing; the click-through is blocked in CSS. */
+  function guardSearch(e) {
+    if (activeRestriction() !== 'hard') return;
+    const box = searchBox();
+    if (!box || !e.target || !box.contains(e.target)) return;
+    if (e.type === 'submit' || e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  function scheduleSweep() {
+    if (sweepScheduled) return;
+    sweepScheduled = true;
+    setTimeout(() => {
+      sweepScheduled = false;
+      sweep();
+    }, 250);
+  }
+
   // ------------------------------------------------------------ the block
 
   function shouldBlock() {
@@ -544,9 +779,21 @@
     }
   });
 
+  document.addEventListener('submit', guardSearch, true);
+  document.addEventListener('keydown', guardSearch, true);
+
+  // YouTube fills the sidebar and the feed long after the page "loads", and
+  // again on every soft navigation, so the sweep follows the DOM rather than
+  // running once.
+  const observer = new MutationObserver(() => {
+    if (activeRestriction() !== 'none') scheduleSweep();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
   setInterval(() => {
     send(false);
     renderHud();
+    sweep();
     if (shouldBlock()) enforce();
   }, POLL_MS);
 

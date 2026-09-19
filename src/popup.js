@@ -17,18 +17,35 @@ async function refresh() {
 }
 
 function render() {
-  const { totals: t, limitMs, current, settings } = snapshot;
+  const { totals: t, limitMs, baseLimitMs, carry, current, settings } = snapshot;
+  const owed = (carry && carry.debt) || 0;
+  const banked = (carry && carry.bonus) || 0;
+  const charged = t.ent + owed;
   $('day-label').textContent = `${prettyDate(snapshot.dayKey)} · day starts ${String(settings.dayStartHour).padStart(2, '0')}:00`;
 
   // Budget
-  const left = limitMs - t.ent;
+  const left = limitMs - charged;
   $('budget-left').textContent = left > 0 ? fmtDuration(left) : `${fmtDuration(-left)} over`;
   $('budget-sub').textContent = left > 0 ? 'entertainment left today' : 'past your daily limit';
-  $('budget-used').textContent = `${fmtDuration(t.ent)} used`;
+  $('budget-used').textContent = `${fmtDuration(charged)} used`;
   $('budget-of').textContent = `of ${fmtDuration(limitMs)}`;
-  const pct = limitMs > 0 ? Math.min(100, (t.ent / limitMs) * 100) : 0;
+  const pct = limitMs > 0 ? Math.min(100, (charged / limitMs) * 100) : 0;
   $('meter-fill').style.width = `${pct}%`;
   $('meter').classList.toggle('over', left <= 0);
+
+  // Where today's ceiling came from — banked yesterday, or already owed.
+  const carryLine = $('carry-line');
+  if (banked > 0) {
+    carryLine.textContent = `${fmtDuration(baseLimitMs)} limit + ${fmtDuration(banked)} banked from yesterday`;
+    carryLine.className = 'carry-line banked';
+    carryLine.hidden = false;
+  } else if (owed > 0) {
+    carryLine.textContent = `${fmtDuration(owed)} of yesterday's overtime already charged to today`;
+    carryLine.className = 'carry-line owed';
+    carryLine.hidden = false;
+  } else {
+    carryLine.hidden = true;
+  }
 
   // Day composition bar + rows
   const bar = $('day-bar');

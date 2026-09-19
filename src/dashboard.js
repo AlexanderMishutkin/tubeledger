@@ -1,10 +1,10 @@
 import {
   CLASS_LABEL, dayBounds, dayKey, dayRange, fmtClock, fmtDuration,
-  normalize, shiftDay, totals, clamp,
+  normalize, shiftDay, totals, clamp, allowanceFor, chargedFor, entBands, NO_CARRY,
 } from './lib/model.js';
 import {
   getSettings, saveSettings, getDay, getDays, setDay, exportAll, importAll, newId, listDayKeys,
-  getBackupMeta,
+  getBackupMeta, getCarryChain, carryOn,
 } from './lib/store.js';
 import {
   supported as fsSupported, storedFolder, folderState, chooseFolder, reconnect, backupIfDue,
@@ -20,6 +20,7 @@ let viewKey = null;       // day being inspected
 let segments = [];        // segments of viewKey
 let history = [];         // [{key, totals}] for the chart
 let mode = 'all';
+let carryChainMap = {};
 let selectedId = null;
 let snapshot = null;
 
@@ -44,7 +45,10 @@ async function reload() {
   const today = dayKey(Date.now(), settings.dayStartHour);
   const keys = dayRange(shiftDay(today, -29), today);
   const days = await getDays(keys);
-  history = keys.map((key) => ({ key, totals: totals(days[key]) }));
+  carryChainMap = await getCarryChain();
+  history = keys.map((key) => ({
+    key, totals: totals(days[key]), carry: carryOn(carryChainMap, key),
+  }));
   render();
 }
 
@@ -96,15 +100,20 @@ function statCard({ key, label, value, sub, swatch, meter, over }) {
 
 function drawStats() {
   const t = totals(segments);
-  const limitMs = settings.entLimitMin * 60000;
-  const left = limitMs - t.ent;
+  const baseLimitMs = settings.entLimitMin * 60000;
+  const carry = settings.carryEnabled ? carryOn(carryChainMap, viewKey) : NO_CARRY;
+  const limitMs = allowanceFor(carry, baseLimitMs);
+  const charged = chargedFor(t.ent, carry);
+  const left = limitMs - charged;
   const host = $('stats');
   host.replaceChildren(
     statCard({
       key: 'ent', label: 'Entertainment', swatch: 'ent',
       value: fmtDuration(t.ent),
-      sub: left >= 0 ? `${fmtDuration(left)} left of ${fmtDuration(limitMs)}` : `${fmtDuration(-left)} over the ${fmtDuration(limitMs)} limit`,
-      meter: limitMs ? t.ent / limitMs : 0,
+      sub: left >= 0
+        ? `${fmtDuration(left)} left of ${fmtDuration(limitMs)}${ceilingNote(carry, baseLimitMs)}`
+        : `${fmtDuration(-left)} over ${fmtDuration(limitMs)}${ceilingNote(carry, baseLimitMs)}`,
+      meter: limitMs ? charged / limitMs : 0,
       over: left < 0,
     }),
     statCard({
@@ -123,6 +132,13 @@ function drawStats() {
       sub: t.bg ? `${fmtDuration(t.fg)} in view · ${fmtDuration(t.bg)} background` : 'all of it in view',
     }),
   );
+}
+
+/** Where today's ceiling came from, in as few words as it can be put. */
+function ceilingNote(carry, baseLimitMs) {
+  if (carry.bonus > 0) return ` (${fmtDuration(baseLimitMs)} + ${fmtDuration(carry.bonus)} banked)`;
+  if (carry.debt > 0) return ` — ${fmtDuration(carry.debt)} of it already owed`;
+  return '';
 }
 
 function drawLegend() {
@@ -145,12 +161,14 @@ function drawLegend() {
   const hist = $('history-legend');
   hist.replaceChildren();
   const limitMs = settings.entLimitMin * 60000;
+  const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const histRows = (mode === 'ent' ? ['ent'] : ['ent', 'work', 'menu'])
     .map((c) => [colorFor(c, false), CLASS_LABEL[c]]);
-  if (limitMs > 0 && history.some((d) => (d.totals.ent || 0) > limitMs)) {
-    histRows.push([getComputedStyle(document.documentElement).getPropertyValue('--c-ent-over').trim(),
-      'Over the limit']);
-  }
+  const bandSeen = (band) => history.some((d) => entBands(d.totals.ent || 0, d.carry, limitMs)
+    .some((b) => b.c === band && b.ms > 0));
+  if (bandSeen('debt')) histRows.push([token('--c-debt'), 'Carried over from the day before']);
+  if (bandSeen('bonus')) histRows.push([token('--c-bonus'), 'Banked time']);
+  if (bandSeen('over')) histRows.push([token('--c-ent-over'), 'Over — charged to the next day']);
   for (const [color, text] of histRows) {
     const item = document.createElement('span');
     const sw = document.createElement('span');
@@ -469,6 +487,7 @@ function fillSettings() {
   $('set-bg').checked = !!settings.countBackground;
   $('set-hud').checked = !!settings.hudEnabled;
   $('set-backup').checked = !!settings.backupEnabled;
+  $('set-carry').checked = !!settings.carryEnabled;
   $('set-remind').value = String(settings.remindEveryMin);
   $('set-block').checked = !!settings.blockEnabled;
 }
@@ -482,6 +501,7 @@ async function onSettingChange() {
     countBackground: $('set-bg').checked,
     hudEnabled: $('set-hud').checked,
     backupEnabled: $('set-backup').checked,
+    carryEnabled: $('set-carry').checked,
     remindEveryMin: clamp(Number($('set-remind').value) || 0, 0, 60),
     blockEnabled: $('set-block').checked,
   });
@@ -495,7 +515,7 @@ async function onSettingChange() {
 }
 
 for (const id of ['set-limit', 'set-daystart', 'set-default', 'set-idle', 'set-bg', 'set-block',
-  'set-hud', 'set-remind', 'set-backup']) {
+  'set-hud', 'set-remind', 'set-backup', 'set-carry']) {
   $(id).addEventListener('change', onSettingChange);
 }
 

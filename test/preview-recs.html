@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- Dev harness for the recommendation thinning. Mocks a watch page with BOTH
+     of YouTube's card layouts (the ytd-compact-video-renderer one and the newer
+     yt-lockup-view-model one) so the structure-based finder is exercised against
+     each, then runs the real content.js against it.
+       npm run preview -> http://localhost:8777/test/preview-recs.html?mode=soft&left=15
+     modes: none | soft | hard ; left = minutes of budget remaining
+     &page=home renders a home feed instead of a watch page -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLedger — recommendation preview</title>
+  <style>
+    body { margin: 0; background: #0f0f0f; color: #f1f1f1; font: 14px/1.5 Roboto, system-ui, sans-serif; }
+    ytd-masthead { display: block; border-bottom: 1px solid #272727; }
+    ytd-masthead #container { height: 56px; display: flex; align-items: center; padding: 0 16px; gap: 16px; }
+    ytd-searchbox { flex: 1; max-width: 480px; display: block; }
+    ytd-searchbox input { width: 100%; height: 32px; border-radius: 999px; border: 1px solid #303030;
+                          background: #121212; color: #f1f1f1; padding: 0 14px; }
+    #page { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; padding: 24px; }
+    .player { aspect-ratio: 16/9; background: #1f1f24; border-radius: 12px; }
+    ytd-compact-video-renderer, yt-lockup-view-model { display: flex; gap: 10px; margin-bottom: 12px; }
+    .thumb { position: relative; width: 168px; height: 94px; background: #2a2a2e; border-radius: 8px; flex: none; }
+    .badge-shape-wiz__text, #text { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.8);
+                                    border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+    .meta { font-size: 13px; }
+    .chan { color: #aaa; font-size: 12px; }
+    a { color: inherit; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <ytd-masthead id="masthead">
+    <div id="container">
+      <div id="start"><b>YouTube</b></div>
+      <ytd-searchbox><input id="search" placeholder="Search"></ytd-searchbox>
+      <div id="end"><div id="buttons"><span>+ Create</span></div></div>
+    </div>
+  </ytd-masthead>
+
+  <div id="page">
+    <div id="primary"><div class="player"></div><video id="v"></video></div>
+    <div id="secondary">
+      <ytd-watch-next-secondary-results-renderer id="related"></ytd-watch-next-secondary-results-renderer>
+    </div>
+  </div>
+  <ytd-browse role="main" hidden><ytd-rich-grid-renderer id="grid"></ytd-rich-grid-renderer></ytd-browse>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const mode = params.get('mode') || 'soft';
+    const leftMin = Number(params.get('left') || 15);
+
+    // Two layouts, on purpose: YouTube ships both, and the finder must not care.
+    const CARDS = [
+      { id: 'short-5m',    dur: '5:00',    layout: 'old' },
+      { id: 'edge-28m',    dur: '28:00',   layout: 'old' },
+      { id: 'over-29m',    dur: '29:00',   layout: 'old' },
+      { id: 'film-105m',   dur: '1:45:02', layout: 'new' },
+      { id: 'short-12m',   dur: '12:30',   layout: 'new' },
+      { id: 'nodur',       dur: null,      layout: 'new' },
+    ];
+    const onHome = params.get('page') === 'home';
+    if (onHome) {
+      // The home feed is only thinned when the path says we are on it.
+      history.replaceState({}, '', '/');
+      document.getElementById('page').hidden = true;
+      document.querySelector('ytd-browse').hidden = false;
+    }
+    const related = onHome ? document.getElementById('grid') : document.getElementById('related');
+    for (const card of CARDS) {
+      const host = document.createElement(card.layout === 'old' ? 'ytd-compact-video-renderer' : 'yt-lockup-view-model');
+      host.dataset.testid = card.id;
+      const link = document.createElement('a');
+      link.href = `/watch?v=${card.id}`;
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      if (card.dur) {
+        const badge = document.createElement(card.layout === 'old' ? 'span' : 'div');
+        if (card.layout === 'old') badge.id = 'text'; else badge.className = 'badge-shape-wiz__text';
+        badge.textContent = card.dur;
+        thumb.appendChild(badge);
+      }
+      link.appendChild(thumb);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${card.id} · ${card.dur || 'live'}`;
+      const chan = document.createElement('div');
+      chan.className = 'chan';
+      chan.textContent = 'Some channel · 120K views';
+      meta.appendChild(chan);
+      link.appendChild(meta);
+      host.appendChild(link);
+      related.appendChild(host);
+    }
+
+    const inbound = [];
+    window.chrome = {
+      runtime: {
+        connect() {
+          return {
+            postMessage() {}, disconnect() {},
+            onMessage: { addListener: (fn) => inbound.push(fn) },
+            onDisconnect: { addListener() {} },
+          };
+        },
+        sendMessage(msg, cb) {
+          if (msg && msg.type === 'setCategory') window.__tlCategory = msg.category;
+          if (cb) cb(true);
+        },
+      },
+    };
+
+    const s = document.createElement('script');
+    s.src = '../src/content.js';
+    s.onload = () => setTimeout(() => {
+      for (const fn of inbound) {
+        fn({
+          type: 'limit', blocked: false, category: 'ent',
+          usedMs: (60 - leftMin) * 60000, limitMs: 60 * 60000,
+          remainingMs: leftMin * 60000, restriction: mode,
+          blockEnabled: true, hudEnabled: true,
+        });
+      }
+    }, 100);
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>

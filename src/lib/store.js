@@ -1,6 +1,8 @@
 // Thin wrapper over chrome.storage.local. Days live under `d:YYYY-MM-DD`,
 // settings under `settings`. Nothing ever leaves the browser.
-import { DEFAULT_SETTINGS, mergeAdjacent, normalize } from './model.js';
+import {
+  DEFAULT_SETTINGS, mergeAdjacent, normalize, totals, carryChain, dayKey, NO_CARRY,
+} from './model.js';
 
 const DAY_PREFIX = 'd:';
 export const SETTINGS_KEY = 'settings';
@@ -74,6 +76,43 @@ export async function importAll(payload, { replace = false } = {}) {
   }
   if (replace) await chrome.storage.local.clear();
   await chrome.storage.local.set(payload.data);
+}
+
+const CARRY_KEY = 'carry';
+
+/** Entertainment per day, for every day on record. */
+export async function entByDay() {
+  const all = await chrome.storage.local.get(null);
+  const out = {};
+  for (const [key, value] of Object.entries(all)) {
+    if (!key.startsWith(DAY_PREFIX)) continue;
+    out[key.slice(DAY_PREFIX.length)] = totals(normalize(value || [])).ent;
+  }
+  return out;
+}
+
+/**
+ * Re-derive the whole debt/bonus chain from the entries themselves and store it.
+ * Cheap — a year of days is 365 additions — and being derived rather than
+ * accumulated means an edit to any past day corrects every day that follows.
+ */
+export async function refreshCarry(settings) {
+  const limitMs = Math.max(0, settings.entLimitMin) * 60000;
+  const today = dayKey(Date.now(), settings.dayStartHour);
+  const chain = settings.carryEnabled
+    ? carryChain(await entByDay(), today, limitMs, settings.carryShare)
+    : {};
+  await chrome.storage.local.set({ [CARRY_KEY]: chain });
+  return chain;
+}
+
+export async function getCarryChain() {
+  const got = await chrome.storage.local.get(CARRY_KEY);
+  return got[CARRY_KEY] || {};
+}
+
+export function carryOn(chain, key) {
+  return (chain && chain[key]) || NO_CARRY;
 }
 
 const BACKUP_KEY = 'backup';

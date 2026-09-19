@@ -1,6 +1,8 @@
 // Hand-rolled SVG charts. No libraries, no innerHTML — every node is created
 // through the DOM API so the whole extension stays auditable by reading it.
-import { CLASS_LABEL, fmtClock, fmtDuration, stackParts } from './model.js';
+import {
+  CLASS_LABEL, fmtClock, fmtDuration, stackParts, entBands, NO_CARRY,
+} from './model.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -23,6 +25,8 @@ export function tokens() {
     menuBg: get('--c-menu-bg'),
     over: get('--c-ent-over'),
     overHot: get('--c-ent-over-hot'),
+    debt: get('--c-debt'),
+    bonus: get('--c-bonus'),
     surface: get('--surface-1'),
     line: get('--line'),
     lineStrong: get('--line-strong'),
@@ -232,10 +236,15 @@ function roundedTopPath(x, y, w, h, r) {
  * One column per day. Entertainment sits at the bottom of every stack so it can
  * be read against the limit line, and whatever went over the line is drawn in
  * its own colour.
- * @param {object} opts {days:[{key, totals}], mode:'all'|'ent', limitMs, onPick, selectedKey}
+ * @param {object} opts {days:[{key, totals, carry}], mode, limitMs, onPick, selectedKey}
  */
 export function renderDailyBars(host, opts) {
   const { days, mode, limitMs, onPick, selectedKey } = opts;
+  const carryOf = (d) => d.carry || NO_CARRY;
+  const overOf = (d) => {
+    const band = entBands(d.totals.ent || 0, carryOf(d), limitMs).find((b) => b.c === 'over');
+    return band ? band.ms : 0;
+  };
   const t = tokens();
   const width = Math.max(360, host.clientWidth || 720);
   const padL = 38;
@@ -247,7 +256,9 @@ export function renderDailyBars(host, opts) {
   const plotH = height - padT - padB;
 
   const stackOrder = mode === 'ent' ? ['ent'] : ['ent', 'work', 'menu'];
-  const dayTotal = (d) => stackOrder.reduce((sum, c) => sum + (d.totals[c] || 0), 0);
+  // Carried debt is charged to the day, so it takes up room in the column too.
+  const dayTotal = (d) => stackOrder.reduce((sum, c) => sum + (d.totals[c] || 0), 0)
+    + carryOf(d).debt;
   const peak = Math.max(1, ...days.map(dayTotal), mode === 'ent' ? limitMs : 0);
   const stepMs = niceStep(peak);
   const top = Math.ceil(peak / stepMs) * stepMs;
@@ -278,13 +289,13 @@ export function renderDailyBars(host, opts) {
   // The one day that went furthest over gets a direct label; the rest stay clean.
   let worst = null;
   for (const d of days) {
-    const over = (d.totals.ent || 0) - limitMs;
-    if (limitMs > 0 && over > 0 && (!worst || over > worst.over)) worst = { key: d.key, over };
+    const over = overOf(d);
+    if (over > 0 && (!worst || over > worst.over)) worst = { key: d.key, over };
   }
 
   days.forEach((d, i) => {
     const x0 = padL + i * bandW + (bandW - barW) / 2;
-    const parts = stackParts(d.totals, stackOrder, limitMs);
+    const parts = stackParts(d.totals, stackOrder, limitMs, carryOf(d));
     parts.forEach((part, idx) => {
       const isTop = idx === parts.length - 1;
       const yTop = y(part.from + part.ms);
@@ -331,7 +342,8 @@ export function renderDailyBars(host, opts) {
       fill: 'transparent', class: 'band', tabindex: 0, role: 'button',
     });
     const total = dayTotal(d);
-    const over = limitMs > 0 ? (d.totals.ent || 0) - limitMs : 0;
+    const over = overOf(d);
+    const carry = carryOf(d);
     hit.setAttribute('aria-label',
       `${d.key}: ${fmtDuration(total)}${over > 0 ? `, ${fmtDuration(over)} over the limit` : ''}`);
     const lines = [
@@ -341,7 +353,15 @@ export function renderDailyBars(host, opts) {
         swatch: t[c],
       })),
     ];
-    if (over > 0) lines.push({ text: `Over the limit by ${fmtDuration(over)}`, swatch: t.over, strong: true });
+    if (carry.debt > 0) {
+      lines.push({ text: `Carried in from the day before: ${fmtDuration(carry.debt)}`, swatch: t.debt });
+    }
+    if (carry.bonus > 0) {
+      lines.push({ text: `Banked and available: ${fmtDuration(carry.bonus)}`, swatch: t.bonus });
+    }
+    if (over > 0) {
+      lines.push({ text: `Over by ${fmtDuration(over)} — charged to the next day`, swatch: t.over, strong: true });
+    }
     lines.push({ text: `Total: ${fmtDuration(total)}`, dim: true });
     hit.addEventListener('mousemove', (e) => showTip(e, lines));
     hit.addEventListener('mouseleave', hideTip);

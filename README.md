@@ -177,7 +177,8 @@ docs/                    screenshots
 ## Development
 
 ```sh
-npm test                 # 41 tests: the model, the decision rule, the engine end-to-end
+npm test                 # 70 tests: the model, the economy, the decision rule,
+                         #           and the engine driven end-to-end
 npm run icons            # regenerate icons/*.png
 npm run preview          # then open http://localhost:8777/test/preview.html
 ```
@@ -188,15 +189,20 @@ and a fake clock, so the counting rules are checked without a browser.
 seeded data, and `test/preview-hud.html?mode=work|ent-toast|menu|blocked` renders
 the indicator over a mock YouTube carrying YouTube's real masthead ids — add
 `&fs=1` for fullscreen (it stubs `document.fullscreenElement`, which is what the
-script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`. All three harnesses
-are for looking at the UI without loading the extension.
+script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`.
+`test/preview-recs.html?mode=soft|hard&left=<minutes>` builds a watch page (or
+`&page=home`) carrying **both** of YouTube's card layouts and runs the real
+content script against it — that is where the thinning rules are verified, since
+headless Chrome renders YouTube's shell but never hydrates its recommendation
+list. All four harnesses are for looking at the UI without loading the extension.
 
 ## The daily chart
 
 Entertainment sits at the **bottom** of every stacked column, because it is the
 one series measured against a line and a segment only reads against a line when
-it starts from the baseline. The daily limit is drawn across both views, and
-whatever went **over** it is split off: a gradient running hot toward the top, a
+it starts from the baseline. Below it sits any **debt carried in** (brown), above
+it any **banked time** used (gold). The daily limit is drawn across both views, and
+whatever went **over** everything is split off: a gradient running hot toward the top, a
 bright cap line, and a glow around the mark — the one thing in the chart allowed
 to be loud. The worst day of the month is labelled outright.
 

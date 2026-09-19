@@ -203,6 +203,13 @@ test('crossing 04:00 files the two halves under different days', async () => {
   assert.equal(today, 6 * 60000, 'six minutes filed after it');
 });
 
+test('carry-over is set aside so the reminder steps can be checked on their own', async () => {
+  store.settings = { carryEnabled: false };
+  await ask({ type: 'settingsChanged' });
+  const snap = await ask({ type: 'getSnapshot' });
+  assert.deepEqual(snap.carry, { debt: 0, bonus: 0 });
+});
+
 test('watching entertainment is nudged at each round figure of budget left', async () => {
   now = new Date(2026, 8, 16, 12, 0, 0, 0).getTime(); // a fresh, empty day
   const tab = openTab(7);
@@ -233,6 +240,104 @@ test('work & education time is never nudged and never blocked', async () => {
   assert.deepEqual(tab.reminders(), [], 'no nudges for educational viewing');
   assert.equal(tab.inbox.filter((m) => m.type === 'limit' && m.blocked).length, 0, 'never blocked');
   assert.equal(totals(store['d:2026-09-17'] || []).work, 40 * 60000);
+});
+
+// ------------------------------------------------------- the carry economy
+
+/** Start a scenario from an empty ledger, so the arithmetic is the test's own. */
+async function wipeDays() {
+  for (const key of Object.keys(store)) if (key.startsWith('d:')) delete store[key];
+  await ask({ type: 'dataChanged' });
+}
+
+test('going over today starts tomorrow already in debt', async () => {
+  store.settings = { carryEnabled: true };
+  await ask({ type: 'settingsChanged' });
+  await wipeDays();
+
+  now = new Date(2026, 9, 5, 12, 0, 0, 0).getTime(); // day one of a clean ledger
+  const tab = openTab(10);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCHING);
+  await hold(tab, 30 * 60, WATCHING); // 30m of entertainment, well inside the hour
+  await tab.close();
+
+  now = new Date(2026, 9, 6, 12, 0, 0, 0).getTime(); // next day
+  const tab2 = openTab(11);
+  await tab2.say({ type: 'hello' });
+  await switchTo(tab2, WATCHING);
+  await hold(tab2, 5, WATCHING);
+  const snap = await ask({ type: 'getSnapshot' });
+
+  assert.equal(snap.carry.debt, 0, 'yesterday stayed under');
+  assert.equal(snap.carry.bonus, 20 * 60000, 'two thirds of the 30m left is banked');
+  assert.equal(snap.limitMs, 80 * 60000, 'so today is allowed 1h20');
+  assert.equal(snap.baseLimitMs, 60 * 60000, 'while the configured limit is untouched');
+  await tab2.close();
+});
+
+test('a heavy day hands its overtime to the next one, and the ceiling notices', async () => {
+  await wipeDays();
+  now = new Date(2026, 9, 10, 10, 0, 0, 0).getTime();
+  const tab = openTab(12);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCHING);
+  await hold(tab, 200 * 60, WATCHING); // a long, deliberate binge
+  await tab.close();
+  const spent = totals(store['d:2026-10-10'] || []).ent;
+  assert.equal(spent, 200 * 60000, 'the binge is on the record');
+
+  now = new Date(2026, 9, 11, 10, 0, 0, 0).getTime();
+  const tab2 = openTab(13);
+  await tab2.say({ type: 'hello' });
+  await switchTo(tab2, BROWSING); // do not watch anything: just look at the damage
+  await hold(tab2, 10, BROWSING);
+  const snap = await ask({ type: 'getSnapshot' });
+
+  // Day one of a clean ledger: the ceiling was the plain 1h limit, and 200m
+  // against it is well past the two-day cap on how much can be carried.
+  assert.equal(snap.carry.debt, 120 * 60000, 'carried over, capped at two days of limit');
+  assert.equal(snap.carry.bonus, 0, 'and nothing is banked on a day like that');
+  assert.ok(snap.blocked, 'the new day is spent before it starts');
+  assert.equal(badge, '0');
+  await tab2.close();
+});
+
+test('the debt is paid down by an idle day rather than lingering', async () => {
+  now = new Date(2026, 9, 12, 10, 0, 0, 0).getTime();
+  const tab = openTab(14);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, BROWSING);
+  await hold(tab, 10, BROWSING);
+  const before = (await ask({ type: 'getSnapshot' })).carry.debt;
+
+  now = new Date(2026, 9, 13, 10, 0, 0, 0).getTime();
+  await switchTo(tab, BROWSING);
+  await hold(tab, 10, BROWSING);
+  const after = (await ask({ type: 'getSnapshot' })).carry.debt;
+
+  assert.ok(after < before, `debt shrinks across an idle day: ${before} -> ${after}`);
+  assert.equal(before - after, 60 * 60000, 'by exactly one limit a day');
+  await tab.close();
+});
+
+test('the pressure on YouTube rises as the budget runs out', async () => {
+  store.settings = { carryEnabled: false, entLimitMin: 60 };
+  await ask({ type: 'settingsChanged' });
+  now = new Date(2026, 10, 2, 9, 0, 0, 0).getTime();
+  const tab = openTab(15);
+  await tab.say({ type: 'hello' });
+  await switchTo(tab, WATCHING);
+
+  await hold(tab, 30 * 60, WATCHING);
+  assert.equal(tab.inbox.at(-1).restriction, 'none', '30m left: YouTube is left alone');
+
+  await hold(tab, 15 * 60, WATCHING);
+  assert.equal(tab.inbox.at(-1).restriction, 'soft', '15m left: long videos get filtered');
+
+  await hold(tab, 11 * 60, WATCHING);
+  assert.equal(tab.inbox.at(-1).restriction, 'hard', '4m left: nothing is offered at all');
+  await tab.close();
 });
 
 test.after(() => { Date.now = realNow; });

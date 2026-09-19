@@ -34,9 +34,9 @@
       for (let i = 0; i < blocks; i += 1) {
         t += (10 + rnd() * 90) * 60000;             // a gap away from YouTube
         const roll = rnd();
-        const c = roll < 0.3 ? 'work' : roll < 0.75 ? 'ent' : 'menu';
+        const c = roll < 0.42 ? 'work' : roll < 0.8 ? 'ent' : 'menu';
         const bg = c !== 'menu' && rnd() < 0.28 ? 1 : 0;
-        const len = (c === 'menu' ? 1 + rnd() * 6 : 4 + rnd() * 35) * 60000;
+        const len = (c === 'menu' ? 1 + rnd() * 6 : 3 + rnd() * (c === 'ent' ? 14 : 30)) * 60000;
         const end = Math.min(t + len, base + 86400000 - 60000);
         if (end <= t) break;
         out.push({ id: `s${key}${i}`, s: t, e: end, c, bg });
@@ -50,7 +50,9 @@
       return out;
     }
 
-    const store = { settings: { entLimitMin: 60, dayStartHour: DAY_START } };
+    const store = {
+      settings: { entLimitMin: 60, dayStartHour: DAY_START, carryEnabled: true, carryShare: 2 / 3 },
+    };
     const today = keyOf(Date.now());
     for (let i = 0; i < 30; i += 1) {
       const d = new Date();
@@ -58,6 +60,17 @@
       const key = keyOf(d.getTime());
       store[`d:${key}`] = makeDay(key, { rich: i === 0 });
     }
+    // One deliberately heavy evening five days back, so the preview shows what
+    // going over actually looks like: overtime, and the debt it leaves behind.
+    const heavyKey = keyOf(Date.now() - 5 * 86400000);
+    const heavyBase = startOf(heavyKey);
+    store[`d:${heavyKey}`] = [
+      { id: 'h1', s: heavyBase + 15 * 3600000, e: heavyBase + 16.2 * 3600000, c: 'ent', bg: 0 },
+      { id: 'h2', s: heavyBase + 16.2 * 3600000, e: heavyBase + 16.4 * 3600000, c: 'menu', bg: 0 },
+      { id: 'h3', s: heavyBase + 18 * 3600000, e: heavyBase + 20.6 * 3600000, c: 'ent', bg: 0 },
+      { id: 'h4', s: heavyBase + 20.6 * 3600000, e: heavyBase + 21.1 * 3600000, c: 'ent', bg: 1 },
+    ];
+
     // A long evening stretch, half of it audible from behind another window.
     const base = startOf(today);
     const from = base + 18.5 * 3600000;
@@ -117,6 +130,15 @@
     const html = await (await fetch('../src/dashboard.html')).text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('root').replaceWith(doc.querySelector('.wrap'));
+    // The carry chain is derived the same way the extension derives it, so the
+    // preview shows real debt/bonus bands rather than made-up ones.
+    const { carryChain, totals, normalize } = await import('../src/lib/model.js');
+    const entPerDay = {};
+    for (const [key, value] of Object.entries(store)) {
+      if (key.startsWith('d:')) entPerDay[key.slice(2)] = totals(normalize(value)).ent;
+    }
+    store.carry = carryChain(entPerDay, today, 60 * 60000, 2 / 3);
+
     await import('../src/dashboard.js');
     // #settings scrolls to the settings panel once the page has rendered
     if (location.hash === '#settings') {

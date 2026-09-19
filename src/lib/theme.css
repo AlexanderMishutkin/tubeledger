@@ -22,6 +22,8 @@
   --c-menu-bg: #d6aa4a;
   --c-ent-over: #e0197f;
   --c-ent-over-hot: #ff5ec8;
+  --c-debt: #a97c50;
+  --c-bonus: #c98a00;
 
   --radius: 10px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -47,6 +49,8 @@
     --c-menu-bg: #dab353;
     --c-ent-over: #f050c0;
     --c-ent-over-hot: #ff9ae8;
+    --c-debt: #8a6240;
+    --c-bonus: #ffe08a;
   }
 }
 
@@ -69,6 +73,8 @@
   --c-menu-bg: #dab353;
   --c-ent-over: #f050c0;
   --c-ent-over-hot: #ff9ae8;
+  --c-debt: #8a6240;
+  --c-bonus: #ffe08a;
 }
 
 * { box-sizing: border-box; }
@@ -134,6 +140,8 @@ input, select {
 .sw-ent-bg { background: var(--c-ent-bg); }
 .sw-menu-bg { background: var(--c-menu-bg); }
 .sw-over { background: var(--c-ent-over); }
+.sw-debt { background: var(--c-debt); }
+.sw-bonus { background: var(--c-bonus); }
 .sw-hatch {
   background-image: repeating-linear-gradient(
     45deg, rgba(255,255,255,.55) 0 1.5px, transparent 1.5px 4px);

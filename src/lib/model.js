@@ -20,7 +20,9 @@ export const DEFAULT_SETTINGS = {
   blockEnabled: true,     // pause entertainment playback once the limit is hit
   hudEnabled: true,       // show the corner indicator on YouTube itself
   remindEveryMin: 5,      // while watching entertainment, remind at each step of this
-  backupEnabled: true,    // write a JSON backup to Downloads once a day
+  backupEnabled: true,    // keep a copy of the ledger in a folder you choose
+  carryEnabled: true,     // overtime becomes tomorrow's debt, thrift becomes bonus
+  carryShare: 2 / 3,      // how much of what you did not spend is banked
 };
 
 const DAY_MS = 86400000;
@@ -173,23 +175,146 @@ export function fromLocalInput(value) {
  *
  * @returns {Array<{c:'ent'|'over'|'work'|'menu', ms:number, from:number}>} bottom-up
  */
-export function stackParts(dayTotals, order, limitMs) {
+export function stackParts(dayTotals, order, limitMs, carry = NO_CARRY) {
   const parts = [];
   let cursor = 0;
   for (const c of order) {
+    if (c === 'ent') {
+      // Entertainment is not one block: it is debt, then budget, then bank, then over.
+      for (const band of entBands(dayTotals.ent || 0, limitMs > 0 ? carry : NO_CARRY, limitMs)) {
+        parts.push({ c: band.c, ms: band.ms, from: cursor });
+        cursor += band.ms;
+      }
+      continue;
+    }
     const ms = dayTotals[c] || 0;
     if (ms <= 0) continue;
-    if (c === 'ent' && limitMs > 0 && ms > limitMs) {
-      parts.push({ c: 'ent', ms: limitMs, from: cursor });
-      cursor += limitMs;
-      parts.push({ c: 'over', ms: ms - limitMs, from: cursor });
-      cursor += ms - limitMs;
-    } else {
-      parts.push({ c, ms, from: cursor });
-      cursor += ms;
-    }
+    parts.push({ c, ms, from: cursor });
+    cursor += ms;
   }
   return parts;
+}
+
+// ------------------------------------------------------------ the economy
+//
+// Going over does not just get logged, it gets *charged*: overtime is carried
+// into the next day as entertainment time already spent. Restraint earns the
+// mirror image — a share of what you did not spend is banked as bonus time.
+//
+// Two consequences worth stating, because they are the whole point:
+//   · a binge is not free; it is borrowed from tomorrow
+//   · the bank cannot grow forever. Banking `share` of what is left each day
+//     converges on bonus = limit · share/(1-share) — two hours on a one-hour
+//     limit at 2/3 — so a month away from YouTube buys a 3h evening, not 30h.
+
+export const NO_CARRY = Object.freeze({ debt: 0, bonus: 0 });
+
+/**
+ * Debt is capped at this many times the daily limit. Without a cap it compounds:
+ * a few heavy days and the budget is permanently spent, which does not deter
+ * anything — it just gets the extension switched off. Two days' worth still
+ * makes an evening expensive while leaving a way back.
+ */
+export const MAX_DEBT_MULT = 2;
+
+/**
+ * What a finished day hands to the next one.
+ * Debt and bonus are mutually exclusive: a day ends either over or under.
+ */
+export function carryForward(entMs, carryIn = NO_CARRY, limitMs = 0, share = DEFAULT_SETTINGS.carryShare) {
+  const allowance = limitMs + (carryIn.bonus || 0);
+  const charged = Math.max(0, entMs) + (carryIn.debt || 0);
+  const left = allowance - charged;
+  if (left >= 0) return { debt: 0, bonus: Math.round(left * share) };
+  return { debt: Math.min(-left, limitMs * MAX_DEBT_MULT), bonus: 0 };
+}
+
+/**
+ * The carry for every day from the first tracked one up to `toKey`, walked
+ * forward. Days with no data are not skipped — a day away from YouTube is a day
+ * that spent nothing, and it earns like one.
+ *
+ * Derived, never accumulated: editing a day three weeks back re-runs the chain
+ * from there, so the ledger cannot drift away from the entries it came from.
+ */
+export function carryChain(entByDay, toKey, limitMs, share = DEFAULT_SETTINGS.carryShare) {
+  const keys = Object.keys(entByDay).sort();
+  const out = {};
+  if (!keys.length) return out;
+  let carry = { ...NO_CARRY };
+  for (const key of dayRange(keys[0], toKey)) {
+    out[key] = carry;
+    carry = carryForward(entByDay[key] || 0, carry, limitMs, share);
+  }
+  return out;
+}
+
+/** What today's ceiling actually is, once yesterday is taken into account. */
+export function allowanceFor(carry, limitMs) {
+  return limitMs + ((carry && carry.bonus) || 0);
+}
+
+/** Entertainment charged to today: what was watched, plus what was owed. */
+export function chargedFor(entMs, carry) {
+  return Math.max(0, entMs) + ((carry && carry.debt) || 0);
+}
+
+export function remainingFor(entMs, carry, limitMs) {
+  return allowanceFor(carry, limitMs) - chargedFor(entMs, carry);
+}
+
+/**
+ * One day's entertainment, cut into the bands the chart draws, bottom-up:
+ *   debt   what yesterday's overtime already took   (brown)
+ *   ent    watched, inside the base limit           (red)
+ *   bonus  watched, inside banked time              (gold)
+ *   over   watched past everything — tomorrow's debt (magenta)
+ */
+export function entBands(entMs, carry = NO_CARRY, limitMs = 0) {
+  const bands = [];
+  const debt = Math.max(0, (carry && carry.debt) || 0);
+  const bonus = Math.max(0, (carry && carry.bonus) || 0);
+  if (debt > 0) bands.push({ c: 'debt', ms: debt });
+
+  let left = Math.max(0, entMs);
+  if (!(limitMs > 0)) {
+    // No limit configured: there is no line to be over, so it is all just time.
+    if (left > 0) bands.push({ c: 'ent', ms: left });
+    return bands;
+  }
+  let pos = debt;
+  const take = (ceiling, name) => {
+    const room = Math.max(0, ceiling - pos);
+    const ms = Math.min(left, room);
+    if (ms > 0) {
+      bands.push({ c: name, ms });
+      left -= ms;
+      pos += ms;
+    }
+  };
+  take(limitMs, 'ent');
+  take(limitMs + bonus, 'bonus');
+  if (left > 0) bands.push({ c: 'over', ms: left });
+  return bands;
+}
+
+/**
+ * How hard YouTube itself should lean on you, by how much budget is left.
+ *   soft  under 20 minutes — long recommendations are filtered out
+ *   hard  under 5 minutes  — nothing is offered at all until the tab is educational
+ */
+export const SOFT_MS = 20 * 60000;
+export const HARD_MS = 5 * 60000;
+
+export function restrictionFor(remainingMs) {
+  if (remainingMs <= HARD_MS) return 'hard';
+  if (remainingMs <= SOFT_MS) return 'soft';
+  return 'none';
+}
+
+/** The longest recommendation worth offering with `remainingMs` left. */
+export function maxSuggestedMs(remainingMs, factor = 1.9) {
+  return Math.max(0, remainingMs) * factor;
 }
 
 /** The two files a backup writes: one always-current, one per month. */

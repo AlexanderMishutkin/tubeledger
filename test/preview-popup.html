@@ -17,7 +17,9 @@
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       })(),
       settings: { dayStartHour: 4, entLimitMin: 60, defaultCategory: 'ent', countBackground: true, idleSeconds: 60, blockEnabled: true },
-      limitMs: m(60),
+      limitMs: m(78),
+      baseLimitMs: m(60),
+      carry: { debt: 0, bonus: m(18) },
       blocked: false,
       idleState: 'active',
       current: { c: 'ent', bg: true, since: Date.now() - m(4) },

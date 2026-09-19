@@ -27,6 +27,13 @@ h1 { font-size: 16px; }
 .meter-fill { height: 100%; width: 0; background: var(--c-ent); border-radius: 999px; }
 .meter.over .meter-fill { background: var(--c-ent); }
 
+.carry-line {
+  margin: 9px 0 0; font-size: 11px; line-height: 1.35;
+  padding-left: 9px; border-left: 3px solid var(--line-strong);
+}
+.carry-line.banked { color: var(--c-bonus); border-left-color: var(--c-bonus); }
+.carry-line.owed { color: var(--c-debt); border-left-color: var(--c-debt); }
+
 .bar { display: flex; height: 10px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--surface-2); }
 .bar > span { display: block; height: 100%; }
 .bar > span.hatch {
