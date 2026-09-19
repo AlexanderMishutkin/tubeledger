@@ -203,9 +203,10 @@ export function stackParts(dayTotals, order, limitMs, carry = NO_CARRY) {
 //
 // Two consequences worth stating, because they are the whole point:
 //   · a binge is not free; it is borrowed from tomorrow
-//   · the bank cannot grow forever. Banking `share` of what is left each day
-//     converges on bonus = limit · share/(1-share) — two hours on a one-hour
-//     limit at 2/3 — so a month away from YouTube buys a 3h evening, not 30h.
+//   · the bank cannot grow forever. Banking `share` of what is left would settle
+//     on limit · share/(1-share) by itself, but that is an asymptote, not a
+//     promise; the bank is capped outright instead, so the ceiling a timer can
+//     ever show is exactly limit + limit. A month away buys a 2h evening.
 
 export const NO_CARRY = Object.freeze({ debt: 0, bonus: 0 });
 
@@ -218,6 +219,14 @@ export const NO_CARRY = Object.freeze({ debt: 0, bonus: 0 });
 export const MAX_DEBT_MULT = 2;
 
 /**
+ * The bank is capped at this many times the daily limit, which fixes the ceiling
+ * any timer can show at (1 + MAX_BONUS_MULT) · limit — two hours on a one-hour
+ * limit. A saved-up evening should be a little longer than usual, not a
+ * different kind of evening.
+ */
+export const MAX_BONUS_MULT = 1;
+
+/**
  * What a finished day hands to the next one.
  * Debt and bonus are mutually exclusive: a day ends either over or under.
  */
@@ -225,7 +234,9 @@ export function carryForward(entMs, carryIn = NO_CARRY, limitMs = 0, share = DEF
   const allowance = limitMs + (carryIn.bonus || 0);
   const charged = Math.max(0, entMs) + (carryIn.debt || 0);
   const left = allowance - charged;
-  if (left >= 0) return { debt: 0, bonus: Math.round(left * share) };
+  if (left >= 0) {
+    return { debt: 0, bonus: Math.min(Math.round(left * share), limitMs * MAX_BONUS_MULT) };
+  }
   return { debt: Math.min(-left, limitMs * MAX_DEBT_MULT), bonus: 0 };
 }
 

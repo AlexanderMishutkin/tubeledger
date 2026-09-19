@@ -45,6 +45,27 @@ on purpose, which is the point.
 The toolbar badge counts the remaining entertainment minutes down: green, then
 amber under ten minutes, then red at zero.
 
+### What yesterday leaves behind
+
+Going over does not just get logged, it gets charged. **Overtime is carried into
+the next day** as entertainment time already spent — the brown band at the bottom
+of tomorrow's column, gone before you open YouTube. Restraint earns the mirror
+image: **two thirds of what you did not spend is banked**, and today's ceiling
+becomes `limit + banked` everywhere a timer appears, while the limit in Settings
+never moves. Time spent into the bank is gold in the chart and costs tomorrow
+nothing; past it is magenta, and it travels.
+
+Both directions are bounded, which is the difference between a budget and a
+spiral:
+
+| | cap | why |
+|---|---|---|
+| debt | 2 × limit | uncapped it compounds, the budget is permanently spent, and the extension gets switched off instead. Two clean days clear the worst case. |
+| bank | 1 × limit | so the ceiling any timer can ever show is **2 × limit** — a saved-up evening is a bit longer than usual, not a different kind of evening. A fortnight away buys the same two hours a weekend away does. |
+
+The chain is **derived** from the entries on every change, never accumulated, so
+correcting a day from three weeks ago re-runs every day after it.
+
 ## The header indicator
 
 YouTube's own header gets a pill, docked next to Create and the bell — real header
@@ -177,7 +198,7 @@ docs/                    screenshots
 ## Development
 
 ```sh
-npm test                 # 70 tests: the model, the economy, the decision rule,
+npm test                 # 73 tests: the model, the economy, the decision rule,
                          #           and the engine driven end-to-end
 npm run icons            # regenerate icons/*.png
 npm run preview          # then open http://localhost:8777/test/preview.html
@@ -194,7 +215,37 @@ script reads), `&theme=light`, `&stale=1`, or `&nomasthead=1`.
 `&page=home`) carrying **both** of YouTube's card layouts and runs the real
 content script against it — that is where the thinning rules are verified, since
 headless Chrome renders YouTube's shell but never hydrates its recommendation
-list. All four harnesses are for looking at the UI without loading the extension.
+list. Add **`&markup=real`** to swap the mock cards for a sidebar captured from a
+live watch page (`test/fixtures/related-sidebar.html`): YouTube's own nesting,
+two links per card, real durations. It prints a probe underneath — which element
+each card resolved to, whether its title is still visible, and every card's
+height before and after, because the point of the blackout is that nothing moves.
+`&flip=1` lifts the restriction again and re-probes, so the way back is checked
+too. All four harnesses are for looking at the UI without loading the extension.
+
+## When the budget runs low
+
+The last stretch of an entertainment budget is when the feed argues hardest, so
+it gets quieter instead:
+
+- **under 20 minutes** — recommendations beside the video that are longer than
+  `remaining × 1.9` go black. A card whose length cannot be read is left alone:
+  only what can be *shown* to be too long is covered.
+- **under 5 minutes** — every recommendation, the whole home feed and the search
+  box. A banner says what happened and offers the one way out.
+
+Marking the tab **work & education** lifts all of it at once, and so does
+fullscreen, which has no recommendations to thin.
+
+Nothing is ever removed from the page. A hidden card keeps its exact box and is
+**painted black** instead, because collapsing it would make the page shorter,
+YouTube would fetch another screenful to fill the gap, and that loop does not
+end. Hiding is done with `visibility`, which covers the whole card however it is
+built — a sidebar card carries two links, the thumbnail and the title, so hiding
+the thumbnail alone left the title sitting there in plain sight — and the black
+square is drawn by a pseudo-element on top. If a card is ever shaped oddly enough
+that the square misses it, what is left is blank space of the same height: never
+leaked content, never a changed layout.
 
 ## The daily chart
 

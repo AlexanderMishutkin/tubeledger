@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   carryForward, carryChain, entBands, stackParts, allowanceFor, chargedFor,
-  remainingFor, NO_CARRY, dayRange, MAX_DEBT_MULT,
+  remainingFor, NO_CARRY, dayRange, MAX_DEBT_MULT, MAX_BONUS_MULT,
 } from '../src/lib/model.js';
 
 const M = (n) => n * 60000;
@@ -89,13 +89,31 @@ test('the chain walks days forward, and a gap day earns like an idle one', () =>
   assert.deepEqual(mins(chain['2026-09-04'].bonus), 47);
 });
 
-test('the bank converges instead of growing forever', () => {
+test('the bank stops growing, and the ceiling is exactly twice the limit', () => {
   const chain = carryChain({ '2026-01-01': 0 }, '2026-03-01', H);
   const last = chain['2026-03-01'];
   assert.equal(last.debt, 0);
-  // Banking 2/3 of what is left settles at bonus = limit·share/(1-share) = 2·limit.
-  assert.equal(mins(last.bonus), 120, 'two months away buys two bonus hours, not sixty');
-  assert.equal(mins(allowanceFor(last, H)), 180, 'so the ceiling tops out at three hours');
+  assert.equal(mins(last.bonus), 60, 'two months away buys one bonus hour, not sixty');
+  assert.equal(mins(allowanceFor(last, H)), 120, 'so the ceiling tops out at two hours');
+});
+
+test('the bank climbs to the cap and then holds there', () => {
+  let carry = NO_CARRY;
+  const banked = [];
+  for (let day = 0; day < 5; day += 1) {
+    carry = carryForward(0, carry, H);       // five days away from YouTube
+    banked.push(mins(carry.bonus));
+  }
+  assert.deepEqual(banked, [40, 60, 60, 60, 60], 'two thirds of an hour, then capped');
+  assert.equal(mins(allowanceFor(carry, H)), 120);
+});
+
+test('the cap holds however large the day it is measured against', () => {
+  const carry = carryForward(0, { debt: 0, bonus: M(60) }, H);
+  assert.equal(mins(carry.bonus), 60, 'a full 2h ceiling left untouched still banks only 1h');
+  let small = NO_CARRY;
+  for (let day = 0; day < 10; day += 1) small = carryForward(0, small, M(10));
+  assert.equal(small.bonus, M(10) * MAX_BONUS_MULT, 'the cap scales with the configured limit');
 });
 
 test('the chain is derived, so fixing an old entry fixes every day after it', () => {

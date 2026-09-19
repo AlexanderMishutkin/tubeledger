@@ -12,7 +12,7 @@
   // unpacked extension does NOT replace this script in tabs that are already
   // open, so a tab can go on running an old build against a new worker. When
   // the worker reports a different version, the pill says so.
-  const BUILD = '0.6.0';
+  const BUILD = '0.6.1';
 
   const POLL_MS = 2000;
   const HEARTBEAT_MS = 10000;
@@ -248,7 +248,26 @@
         #${HUD_ID} .tl-toast, #${HUD_ID} .tl-toast.tl-out { animation: none; }
       }
 
-      [${HIDE_ATTR}] { display: none !important; }
+      /* A hidden card keeps its exact box. Collapsing it would make the page
+         shorter, YouTube would fetch another screenful to fill the gap, and that
+         loop does not end — an endless scroll nobody asked for. So the card stays
+         where it is and gets painted out instead.
+         Hiding by visibility covers every descendant however the card is built
+         (the caption is a second link, outside the thumbnail, so hiding the
+         thumbnail alone left the title sitting there); the pseudo-element opts
+         back in to draw the square. If a card is shaped oddly enough that the
+         square misses, what is left is blank space of the same height — never
+         leaked content, never a changed layout. */
+      [${HIDE_ATTR}] {
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      [${HIDE_ATTR}][data-tl-paint="rel"] { position: relative !important; }
+      [${HIDE_ATTR}]::after {
+        content: ''; visibility: visible;
+        position: absolute; inset: 0;
+        background: #000; border-radius: 12px;
+      }
       [data-tl-search="off"] {
         opacity: .35 !important; pointer-events: none !important; filter: grayscale(1);
       }
@@ -530,34 +549,80 @@
     return hinted !== null ? hinted : plain;
   }
 
+  const LINK_SEL = 'a[href*="/watch?v="], a[href*="/shorts/"]';
+
+  /** The video a link points at, or null. Ids only — no titles, no queries kept. */
+  function videoIdOf(link) {
+    const href = link.getAttribute('href') || '';
+    const watch = /[?&]v=([\w-]+)/.exec(href);
+    if (watch) return watch[1];
+    const short = /\/shorts\/([\w-]+)/.exec(href);
+    return short ? short[1] : null;
+  }
+
+  /** True while an ancestor is still about this one video and nothing else. */
+  function coversOneVideo(node, id) {
+    for (const link of node.querySelectorAll(LINK_SEL)) {
+      const other = videoIdOf(link);
+      if (other && other !== id) return false;
+    }
+    return true;
+  }
+
   /**
-   * The card a link belongs to: walk up while the ancestor still covers this one
-   * video, and stop before the one that covers several. Structure, not class
+   * The card a link belongs to: walk up while the ancestor is still about this
+   * one video, and stop before the one that covers several. Structure, not class
    * names, so a YouTube redesign does not silently switch the feature off.
+   *
+   * Counting *links* here was wrong: a sidebar card holds two of them, the
+   * thumbnail and the title, so the walk stopped at the thumbnail and the title
+   * stayed on the page. Distinct video ids is the honest test of "one card".
    */
   function cardFor(link, root) {
+    const id = videoIdOf(link);
     let node = link;
     for (let i = 0; i < 8; i += 1) {
       const parent = node.parentElement;
       if (!parent || parent === root || parent === document.body) return node;
-      if (parent.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]').length > 1) return node;
+      if (id && !coversOneVideo(parent, id)) return node;
+      if (!id && parent.querySelectorAll(LINK_SEL).length > 1) return node;
       node = parent;
     }
     return node;
   }
 
   function cardsIn(root) {
-    const seen = new Set();
-    for (const link of root.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]')) {
+    const cards = [];
+    let last = null;
+    // querySelectorAll is in document order, so every link of a card follows the
+    // first one: checking the last card found is enough to skip the rest of them.
+    for (const link of root.querySelectorAll(LINK_SEL)) {
+      if (last && last.contains(link)) continue;
       const card = cardFor(link, root);
-      if (card && card !== root) seen.add(card);
+      if (!card || card === root) continue;
+      last = card;
+      if (!cards.includes(card)) cards.push(card);
     }
-    return [...seen];
+    return cards;
+  }
+
+  /**
+   * YouTube keeps the watch page in the DOM after you navigate back to the feed,
+   * just hidden — so "the element exists" is not the same as "you can see it".
+   * A hidden root would swallow the banner and waste a sweep on cards nobody
+   * is looking at.
+   */
+  function onScreen(node) {
+    if (!node) return false;
+    if (node.checkVisibility) return node.checkVisibility({ checkVisibilityCSS: true });
+    return !!(node.offsetParent || node.getClientRects().length);
   }
 
   function suggestionRoots() {
     const roots = [];
-    const push = (node) => { if (node && !roots.includes(node)) roots.push(node); };
+    const push = (node) => {
+      if (node && onScreen(node) && !roots.includes(node)) roots.push(node);
+    };
     push(document.querySelector('ytd-watch-next-secondary-results-renderer'));
     push(document.querySelector('#secondary #related'));
     push(document.querySelector('#secondary'));
@@ -567,7 +632,9 @@
   function homeRoots() {
     if (!/^\/(|feed\/(subscriptions|trending|explore))\/?$/.test(location.pathname)) return [];
     const roots = [];
-    const push = (node) => { if (node && !roots.includes(node)) roots.push(node); };
+    const push = (node) => {
+      if (node && onScreen(node) && !roots.includes(node)) roots.push(node);
+    };
     push(document.querySelector('ytd-rich-grid-renderer'));
     push(document.querySelector('ytd-browse[role="main"] #contents'));
     push(document.querySelector('#primary #contents'));
@@ -575,11 +642,22 @@
   }
 
   function mark(node, reason) {
+    if (!node.hasAttribute(HIDE_ATTR)) {
+      // The black square is drawn by a pseudo-element, which needs a positioned
+      // card to sit on. Only a statically positioned one is nudged to relative —
+      // that changes no geometry — and anything YouTube already positions is left
+      // exactly as it is.
+      const positioned = getComputedStyle(node).position !== 'static';
+      if (!positioned) node.setAttribute('data-tl-paint', 'rel');
+    }
     if (node.getAttribute(HIDE_ATTR) !== reason) node.setAttribute(HIDE_ATTR, reason);
   }
 
   function unmarkAll() {
-    for (const node of document.querySelectorAll(`[${HIDE_ATTR}]`)) node.removeAttribute(HIDE_ATTR);
+    for (const node of document.querySelectorAll(`[${HIDE_ATTR}]`)) {
+      node.removeAttribute(HIDE_ATTR);
+      node.removeAttribute('data-tl-paint');
+    }
     const banner = document.getElementById(BANNER_ID);
     if (banner) banner.remove();
     const search = searchBox();
@@ -622,6 +700,7 @@
           thinned += 1;
         } else if (card.hasAttribute(HIDE_ATTR)) {
           card.removeAttribute(HIDE_ATTR);
+          card.removeAttribute('data-tl-paint');
         }
       }
     }
@@ -652,8 +731,8 @@
     let banner = document.getElementById(BANNER_ID);
     const hard = activeRestriction() === 'hard';
     const text = hard
-      ? `${fmt(Math.max(0, remainingMs))} of entertainment left — YouTube is holding off.`
-      : `${fmt(Math.max(0, remainingMs))} left — anything longer than ${fmt(Math.max(0, remainingMs) * SUGGESTION_FACTOR)} is hidden.`;
+      ? `${fmt(Math.max(0, remainingMs))} of entertainment left — the recommendations are blacked out.`
+      : `${fmt(Math.max(0, remainingMs))} left — anything longer than ${fmt(Math.max(0, remainingMs) * SUGGESTION_FACTOR)} is blacked out.`;
     if (banner) {
       const line = banner.querySelector('.tl-b-text');
       if (line) line.textContent = text;

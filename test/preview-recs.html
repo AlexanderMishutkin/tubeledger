@@ -5,7 +5,11 @@
      each, then runs the real content.js against it.
        npm run preview -> http://localhost:8777/test/preview-recs.html?mode=soft&left=15
      modes: none | soft | hard ; left = minutes of budget remaining
-     &page=home renders a home feed instead of a watch page -->
+     &page=home renders a home feed instead of a watch page
+     &markup=real replaces the mock cards with a real YouTube sidebar captured
+       from a live watch page (test/fixtures/related-sidebar.html) — two links per
+       card, YouTube's own nesting — and prints a probe: which element each card
+       resolved to, whether its title is still visible, and how its height moved. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -17,6 +21,7 @@
     ytd-searchbox { flex: 1; max-width: 480px; display: block; }
     ytd-searchbox input { width: 100%; height: 32px; border-radius: 999px; border: 1px solid #303030;
                           background: #121212; color: #f1f1f1; padding: 0 14px; }
+    #page[hidden], ytd-browse[hidden] { display: none; }
     #page { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; padding: 24px; }
     .player { aspect-ratio: 16/9; background: #1f1f24; border-radius: 12px; }
     ytd-compact-video-renderer, yt-lockup-view-model { display: flex; gap: 10px; margin-bottom: 12px; }
@@ -26,6 +31,29 @@
     .meta { font-size: 13px; }
     .chan { color: #aaa; font-size: 12px; }
     a { color: inherit; text-decoration: none; }
+
+    /* Rough stand-in for YouTube's own sidebar CSS, enough for real geometry.
+       Deliberately no `position` here: the capture has to exercise the same
+       static-card path the live page does. */
+    .ytLockupViewModelHost { display: flex; gap: 8px; margin-bottom: 8px; }
+    .ytLockupViewModelContentImage { flex: none; width: 168px; }
+    yt-thumbnail-view-model { display: block; }
+    .ytThumbnailViewModelImage { position: relative; aspect-ratio: 16/9; background: #2a2a2e;
+                                 border-radius: 8px; overflow: hidden; }
+    .ytThumbnailViewModelImage img { width: 100%; height: 100%; object-fit: cover; }
+    yt-thumbnail-bottom-overlay-view-model { position: absolute; right: 6px; bottom: 6px; }
+    .ytBadgeShapeText { background: rgba(0,0,0,.8); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+    .ytLockupViewModelMetadata { flex: 1; min-width: 0; }
+    .ytLockupMetadataViewModelHost { display: flex; gap: 8px; }
+    .ytLockupMetadataViewModelAvatar { display: none; }
+    h3 { margin: 0 0 4px; font-size: 14px; line-height: 1.3; }
+    .ytContentMetadataViewModelMetadataRow { color: #aaa; font-size: 12px; }
+    /* The capture brings YouTube's inline icons without YouTube's icon CSS. */
+    yt-lockup-view-model svg, yt-lockup-view-model img { width: 14px !important; height: 14px !important; }
+    yt-lockup-view-model .ytThumbnailViewModelImage img { width: 100% !important; height: 100% !important; }
+    yt-decorated-avatar-view-model, .ytLockupMetadataViewModelMenuButton, button-view-model { display: none; }
+    #probe { white-space: pre; font: 12px/1.45 ui-monospace, monospace; padding: 16px;
+             border-top: 1px solid #272727; color: #c7c7c7; }
   </style>
 </head>
 <body>
@@ -44,6 +72,7 @@
     </div>
   </div>
   <ytd-browse role="main" hidden><ytd-rich-grid-renderer id="grid"></ytd-rich-grid-renderer></ytd-browse>
+  <pre id="probe">…</pre>
 
   <script>
     const params = new URLSearchParams(location.search);
@@ -59,6 +88,7 @@
       { id: 'short-12m',   dur: '12:30',   layout: 'new' },
       { id: 'nodur',       dur: null,      layout: 'new' },
     ];
+    const real = params.get('markup') === 'real';
     const onHome = params.get('page') === 'home';
     if (onHome) {
       // The home feed is only thinned when the path says we are on it.
@@ -67,7 +97,7 @@
       document.querySelector('ytd-browse').hidden = false;
     }
     const related = onHome ? document.getElementById('grid') : document.getElementById('related');
-    for (const card of CARDS) {
+    for (const card of real ? [] : CARDS) {
       const host = document.createElement(card.layout === 'old' ? 'ytd-compact-video-renderer' : 'yt-lockup-view-model');
       host.dataset.testid = card.id;
       const link = document.createElement('a');
@@ -110,9 +140,50 @@
       },
     };
 
+    // Heights are measured before and after, because the whole point of painting
+    // a card black instead of removing it is that the page does not get shorter.
+    const lockups = () => [...related.querySelectorAll('yt-lockup-view-model, ytd-compact-video-renderer, ytd-rich-item-renderer')];
+    let before = null;
+
+    function probe() {
+      const rows = lockups().map((card, i) => {
+        const marked = card.querySelector('[data-tl-hide]') || (card.hasAttribute('data-tl-hide') ? card : null);
+        const title = card.querySelector('h3 a, .meta') || card.querySelector('a[href*="/watch"]');
+        const vis = title ? getComputedStyle(title).visibility : '?';
+        const dur = (card.textContent.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/) || ['—'])[0];
+        const now = card.getBoundingClientRect().height;
+        return [
+          String(i).padStart(2),
+          dur.padEnd(8),
+          ('marked:' + (marked ? marked.tagName.toLowerCase() : 'none')).padEnd(32),
+          ('title:' + vis).padEnd(16),
+          'h:' + before[i].toFixed(1) + '->' + now.toFixed(1) + (Math.abs(before[i] - now) < 0.5 ? ' ok' : '  MOVED'),
+        ].join(' ');
+      });
+      const banner = document.getElementById('tubeledger-thinned');
+      // The banner is the one thing allowed to add height: it explains the squares.
+      const bannerH = banner ? banner.getBoundingClientRect().height : 0;
+      const page = pageHeight();  // what an infinite scroll watches
+      const grew = page - pageBefore;
+      document.getElementById('probe').textContent = [
+        rows.join('\n'),
+        `page height ${pageBefore.toFixed(1)} -> ${page.toFixed(1)} (${grew >= 0 ? '+' : ''}${grew.toFixed(1)}), `
+          + `banner ${bannerH.toFixed(1)}`
+          + (Math.abs(grew - bannerH) < 20 ? ' — the banner and nothing else' : ' — SOMETHING ELSE MOVED'),
+        `marked ${document.querySelectorAll('[data-tl-hide]').length}`
+          + `, search ${document.querySelectorAll('[data-tl-search="off"]').length ? 'disabled' : 'live'}`,
+      ].join('\n');
+    }
+
+    let pageBefore = 0;
+    // The probe box grows as it fills, so it is measured out of the page height.
+    const pageHeight = () =>
+      document.documentElement.scrollHeight - document.getElementById('probe').getBoundingClientRect().height;
     const s = document.createElement('script');
     s.src = '../src/content.js';
     s.onload = () => setTimeout(() => {
+      before = lockups().map((c) => c.getBoundingClientRect().height);
+      pageBefore = pageHeight();
       for (const fn of inbound) {
         fn({
           type: 'limit', blocked: false, category: 'ent',
@@ -121,8 +192,36 @@
           blockEnabled: true, hudEnabled: true,
         });
       }
+      setTimeout(() => {
+        probe();
+        if (params.get('flip') !== '1') return;
+        const was = document.getElementById('probe').textContent;
+        for (const fn of inbound) {
+          fn({
+            type: 'limit', blocked: false, category: 'ent',
+            usedMs: 0, limitMs: 60 * 60000, remainingMs: 60 * 60000,
+            restriction: 'none', blockEnabled: true, hudEnabled: true,
+          });
+        }
+        setTimeout(() => {
+          probe();
+          document.getElementById('probe').textContent =
+            `${was}\n\n--- restriction lifted ---\n${document.getElementById('probe').textContent}`;
+        }, 400);
+      }, 500);
     }, 100);
-    document.body.appendChild(s);
+
+    if (real) {
+      fetch('fixtures/related-sidebar.html')
+        .then((r) => r.text())
+        .then((html) => {
+          const frag = document.createRange().createContextualFragment(html);
+          related.appendChild(frag);
+          document.body.appendChild(s);
+        });
+    } else {
+      document.body.appendChild(s);
+    }
   </script>
 </body>
 </html>
